@@ -10,4 +10,4 @@ This project aims to design and develop a software-based industrial voice safety
 
 ## Architectural Diagram : 
 
-![Architecture](assets/Architecture_dark.png)
+![Architecture](utils/Architecture_dark.png)
