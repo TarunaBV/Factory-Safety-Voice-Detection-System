@@ -10,4 +10,67 @@ This project aims to design and develop a software-based industrial voice safety
 
 ## Architectural Diagram : 
 
-![Architecture](utils/Architecture_dark.png)
+![Architecture](assets/Architecture_dark.png)
+
+## Project Structure
+
+```
+factory-safety-voice-detection/
+│
+├── assets/
+│   ├── audio_utils.py
+│   ├── noise_reduction.py
+│   ├── feature_utils.py
+│   ├── db_utils.py
+│   ├── config.py
+│   └── logger.py
+│
+├── program/
+│   ├── audio_input.py
+│   ├── vad.py
+│   ├── preprocessing.py
+│   ├── feature_extraction.py
+│   ├── keyword_spotting.py
+│   ├── confidence_gate.py
+│   ├── alert_system.py
+│   └── main.py
+│
+├── models/
+│   ├── ds_cnn_model.pth
+│   ├── labels.txt
+│   └── model_loader.py
+│
+├── data/
+│   ├── raw_audio/
+│   ├── processed_audio/
+│   ├── features/
+│   └── logs/
+│
+├── database/
+│   ├── events.db
+│   └── schema.sql
+│
+├── dashboard/
+│   ├── app.py
+│   ├── components/
+│   └── static/
+│
+├── templates/
+│   ├── index.html
+│   └── dashboard.html
+│
+├── tests/
+│   ├── test_vad.py
+│   ├── test_model.py
+│   └── test_pipeline.py
+│
+├── scripts/
+│   ├── train_model.py
+│   ├── evaluate_model.py
+│   └── data_augmentation.py
+│ 
+├── .gitignore
+├── README.md
+├── requirements.txt
+└── run.py
+```
