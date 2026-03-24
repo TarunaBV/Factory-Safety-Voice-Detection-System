@@ -1,1 +1,13 @@
-dataset/raw/
+dataset/raw/*
+!dataset/raw/demand_noise/
+dataset/raw/demand_noise/*
+!dataset/raw/demand_noise/.gitkeep
+!dataset/raw/demand_noise/NFIELD/
+!dataset/raw/demand_noise/PRESTO/
+!dataset/raw/demand_noise/TCAR/
+dataset/raw/demand_noise/NFIELD/*
+dataset/raw/demand_noise/PRESTO/*
+dataset/raw/demand_noise/TCAR/*
+!dataset/raw/demand_noise/NFIELD/.gitkeep
+!dataset/raw/demand_noise/PRESTO/.gitkeep
+!dataset/raw/demand_noise/TCAR/.gitkeep
