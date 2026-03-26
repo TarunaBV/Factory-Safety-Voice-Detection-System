@@ -6,7 +6,7 @@ FRAME_DURATION_MS = 20
 FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION_MS / 1000)
 
 vad = webrtcvad.Vad()
-vad.set_mode(2) 
+vad.set_mode(3) 
 
 def float_to_pcm16(audio):
     audio = np.clip(audio, -1.0, 1.0)
