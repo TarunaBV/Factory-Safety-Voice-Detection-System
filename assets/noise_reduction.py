@@ -23,8 +23,8 @@ def aggressive_noise_reduce(audio, sr):
         y=audio, 
         sr=sr, 
         stationary=True, 
-        prop_decrease=1.0, # Complete removal
-        n_fft=4096         # Higher resolution for cleaner separation
+        prop_decrease=1.0, 
+        n_fft=4096        
     )
 
 def apply_noise_gate(audio, threshold_db=-45):
@@ -32,26 +32,19 @@ def apply_noise_gate(audio, threshold_db=-45):
     Forces absolute silence (0.0) when the signal is below the threshold.
     This eliminates the 'hiss' or 'warble' left between words.
     """
-    # We use a small window to avoid clipping individual wave peaks
     audio_abs = np.abs(audio)
     db_level = 20 * np.log10(audio_abs + 1e-6)
-    
-    # Create a mask: 1.0 (keep) if above threshold, 0.0 (mute) if below
     gate_mask = (db_level > threshold_db).astype(float)
-    
     return audio * gate_mask
 
 def super_clean_pipeline(audio, sr):
     """The full chain for maximum background removal."""
     # 1. Filter out rumble and high-end hiss first
     processed = bandpass_filter(audio, sr)
-    
     # 2. Subtract the background noise profile
     processed = aggressive_noise_reduce(processed, sr)
-    
     # 3. Kill the remaining 'ghost' artifacts with a gate
     processed = apply_noise_gate(processed, threshold_db=-40)
-    
     # 4. Bring the voice back to a clear volume
     return normalize(processed)
 
