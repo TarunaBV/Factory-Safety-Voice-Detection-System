@@ -12,6 +12,9 @@ This project aims to design and develop a software-based industrial voice safety
 
 ![Architecture](assets/Architecture_dark.png)
 
+## Preprocessed dataset
+Link="https://drive.google.com/file/d/10Nqfo0jZ8aCeAx5tEw2U58V1s0l3qCVs/view?usp=sharing"
+
 ## Project Structure
 
 ```
