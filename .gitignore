@@ -1,2 +1,1 @@
-dataset/final/*
-dataset/raw/*
+dataset/**/*.wav
