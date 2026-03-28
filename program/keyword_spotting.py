@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import numpy as np
 
@@ -41,13 +42,68 @@ def cosine_similarity(left: np.ndarray, right: np.ndarray) -> float:
     return float(np.dot(left, right) / denominator)
 
 
-def iter_negative_files(dataset_root: str | Path) -> list[Path]:
+def discover_keywords(dataset_root: str | Path) -> list[str]:
+    dataset_root = Path(dataset_root)
+    if not dataset_root.exists():
+        return []
+
+    keywords: list[str] = []
+    for child in sorted(dataset_root.iterdir()):
+        if child.is_dir() and child.name not in NEGATIVE_FOLDERS:
+            if list_wav_files(child):
+                keywords.append(child.name)
+    return keywords
+
+
+def resolve_keyword(dataset_root: str | Path, keyword: str) -> str:
+    keywords = discover_keywords(dataset_root)
+    if keyword in keywords:
+        return keyword
+
+    lookup = {item.lower(): item for item in keywords}
+    resolved = lookup.get(keyword.lower())
+    if resolved is not None:
+        return resolved
+
+    available = ", ".join(keywords) if keywords else "none"
+    raise FileNotFoundError(
+        f"Keyword '{keyword}' was not found in {Path(dataset_root)}. Available keywords: {available}"
+    )
+
+
+def sanitize_keyword_name(keyword: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", keyword.strip().lower()).strip("_")
+    return cleaned or "keyword"
+
+
+def default_model_path(keyword: str, output_dir: str | Path = "models") -> Path:
+    return Path(output_dir) / f"{sanitize_keyword_name(keyword)}_template_spotter.npz"
+
+
+def _collect_label_files(dataset_root: Path, label: str) -> list[Path]:
+    label_dir = dataset_root / label
+    if not label_dir.exists():
+        return []
+    return list_wav_files(label_dir)
+
+
+def iter_negative_files(
+    dataset_root: str | Path,
+    keyword: str | None = None,
+    include_other_keywords: bool = True,
+) -> list[Path]:
     dataset_root = Path(dataset_root)
     files: list[Path] = []
+
     for folder in NEGATIVE_FOLDERS:
-        path = dataset_root / folder
-        if path.exists():
-            files.extend(list_wav_files(path))
+        files.extend(_collect_label_files(dataset_root, folder))
+
+    if include_other_keywords and keyword is not None:
+        resolved_keyword = resolve_keyword(dataset_root, keyword)
+        for label in discover_keywords(dataset_root):
+            if label != resolved_keyword:
+                files.extend(_collect_label_files(dataset_root, label))
+
     return sorted(files)
 
 
@@ -83,6 +139,27 @@ class KeywordPrediction:
     threshold: float
     backend: str
     best_window_start_ms: int = 0
+
+
+@dataclass
+class MultiKeywordPrediction(KeywordPrediction):
+    runner_up_label: str = "unknown"
+    runner_up_score: float = 0.0
+
+
+@dataclass
+class KeywordAnalysis:
+    keyword: str
+    positive_count: int
+    negative_count: int
+    threshold: float
+    balanced_accuracy: float
+    positive_score_mean: float
+    negative_score_mean: float
+    score_margin: float
+    positive_score_min: float
+    negative_score_max: float
+    output_model_path: str
 
 
 @dataclass
@@ -159,19 +236,58 @@ class TemplateKeywordSpotter:
         )
 
 
-def train_template_spotter(
+@dataclass
+class MultiKeywordTemplateSpotter:
+    spotters: list[TemplateKeywordSpotter]
+    backend: str = "template-ensemble"
+
+    def __post_init__(self) -> None:
+        if not self.spotters:
+            raise ValueError("At least one keyword spotter is required.")
+
+    def predict_audio(self, audio: np.ndarray, window_hop_ms: int = 250) -> MultiKeywordPrediction:
+        candidates = [spotter.predict_audio(audio, window_hop_ms=window_hop_ms) for spotter in self.spotters]
+        ranked = sorted(candidates, key=lambda item: item.score, reverse=True)
+        best = ranked[0]
+        runner_up = ranked[1] if len(ranked) > 1 else None
+
+        return MultiKeywordPrediction(
+            detected=best.detected,
+            label=best.label if best.detected else "unknown",
+            score=best.score,
+            threshold=best.threshold,
+            backend=self.backend,
+            best_window_start_ms=best.best_window_start_ms,
+            runner_up_label=runner_up.label if runner_up is not None else "unknown",
+            runner_up_score=runner_up.score if runner_up is not None else 0.0,
+        )
+
+    def predict_file(self, path: str | Path) -> MultiKeywordPrediction:
+        audio = load_audio(path, target_sr=self.spotters[0].config.sample_rate)
+        return self.predict_audio(audio)
+
+    @classmethod
+    def from_paths(cls, model_paths: Sequence[str | Path]) -> "MultiKeywordTemplateSpotter":
+        return cls([TemplateKeywordSpotter.load(path) for path in model_paths])
+
+
+def analyze_template_keyword(
     dataset_root: str | Path,
-    keyword: str = "stop",
+    keyword: str,
     config: FeatureConfig = DEFAULT_CONFIG,
     max_positive: int | None = None,
     max_negative: int | None = None,
-) -> tuple[TemplateKeywordSpotter, dict[str, float]]:
+    output_dir: str | Path = "models",
+) -> tuple[TemplateKeywordSpotter, KeywordAnalysis]:
     dataset_root = Path(dataset_root)
-    positive_files = list_wav_files(dataset_root / keyword)
-    negative_files = iter_negative_files(dataset_root)
+    resolved_keyword = resolve_keyword(dataset_root, keyword)
+    positive_files = list_wav_files(dataset_root / resolved_keyword)
+    negative_files = iter_negative_files(dataset_root, resolved_keyword, include_other_keywords=True)
 
     if not positive_files:
-        raise FileNotFoundError(f"No WAV files found for keyword '{keyword}' in {dataset_root}")
+        raise FileNotFoundError(
+            f"No WAV files found for keyword '{resolved_keyword}' in {dataset_root}"
+        )
 
     if max_positive is not None:
         positive_files = positive_files[:max_positive]
@@ -186,7 +302,6 @@ def train_template_spotter(
         [cosine_similarity(prototype_2d, features) for features in positive_features],
         dtype=np.float32,
     )
-
     negative_scores = np.asarray(
         [cosine_similarity(prototype_2d, extract_features_from_file(path, config=config)) for path in negative_files],
         dtype=np.float32,
@@ -194,21 +309,76 @@ def train_template_spotter(
 
     threshold, balanced_accuracy = _best_threshold(positive_scores, negative_scores)
     model = TemplateKeywordSpotter(
-        keyword=keyword,
+        keyword=resolved_keyword,
         prototype=prototype_2d,
         threshold=threshold,
         config=config,
     )
+    analysis = KeywordAnalysis(
+        keyword=resolved_keyword,
+        positive_count=len(positive_files),
+        negative_count=len(negative_files),
+        threshold=float(threshold),
+        balanced_accuracy=float(balanced_accuracy),
+        positive_score_mean=float(np.mean(positive_scores)),
+        negative_score_mean=float(np.mean(negative_scores)) if negative_scores.size else 0.0,
+        score_margin=float(np.mean(positive_scores) - np.mean(negative_scores)) if negative_scores.size else float(np.mean(positive_scores)),
+        positive_score_min=float(np.min(positive_scores)),
+        negative_score_max=float(np.max(negative_scores)) if negative_scores.size else 0.0,
+        output_model_path=str(default_model_path(resolved_keyword, output_dir=output_dir)),
+    )
+    return model, analysis
 
-    metrics = {
-        "positive_count": float(len(positive_files)),
-        "negative_count": float(len(negative_files)),
-        "positive_score_mean": float(np.mean(positive_scores)),
-        "negative_score_mean": float(np.mean(negative_scores)) if negative_scores.size else 0.0,
-        "threshold": float(threshold),
-        "balanced_accuracy": float(balanced_accuracy),
+
+def train_template_spotter(
+    dataset_root: str | Path,
+    keyword: str = "stop",
+    config: FeatureConfig = DEFAULT_CONFIG,
+    max_positive: int | None = None,
+    max_negative: int | None = None,
+) -> tuple[TemplateKeywordSpotter, dict[str, float]]:
+    model, analysis = analyze_template_keyword(
+        dataset_root=dataset_root,
+        keyword=keyword,
+        config=config,
+        max_positive=max_positive,
+        max_negative=max_negative,
+    )
+    return model, {
+        "positive_count": float(analysis.positive_count),
+        "negative_count": float(analysis.negative_count),
+        "positive_score_mean": float(analysis.positive_score_mean),
+        "negative_score_mean": float(analysis.negative_score_mean),
+        "threshold": float(analysis.threshold),
+        "balanced_accuracy": float(analysis.balanced_accuracy),
     }
-    return model, metrics
+
+
+def train_keyword_collection(
+    dataset_root: str | Path,
+    keywords: Sequence[str] | None = None,
+    output_dir: str | Path = "models",
+    config: FeatureConfig = DEFAULT_CONFIG,
+    max_positive: int | None = None,
+    max_negative: int | None = None,
+) -> list[KeywordAnalysis]:
+    dataset_root = Path(dataset_root)
+    selected_keywords = list(keywords) if keywords else discover_keywords(dataset_root)
+    analyses: list[KeywordAnalysis] = []
+
+    for keyword in selected_keywords:
+        model, analysis = analyze_template_keyword(
+            dataset_root=dataset_root,
+            keyword=keyword,
+            config=config,
+            max_positive=max_positive,
+            max_negative=max_negative,
+            output_dir=output_dir,
+        )
+        model.save(analysis.output_model_path)
+        analyses.append(analysis)
+
+    return analyses
 
 
 def load_spotter(model_path: str | Path) -> TemplateKeywordSpotter:
@@ -223,24 +393,51 @@ def load_spotter(model_path: str | Path) -> TemplateKeywordSpotter:
     raise ValueError(f"Unsupported model format: {model_path.suffix}")
 
 
+def load_spotters_from_directory(models_dir: str | Path) -> list[TemplateKeywordSpotter]:
+    paths = sorted(Path(models_dir).glob("*_template_spotter.npz"))
+    if not paths:
+        raise FileNotFoundError(f"No template spotters were found in {Path(models_dir)}")
+    return [load_spotter(path) for path in paths]
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Keyword spotting utilities for the factory safety project.")
+    parser = argparse.ArgumentParser(description="General keyword spotting utilities for the factory safety project.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    train_parser = subparsers.add_parser("train-template", help="Train a template spotter from raw dataset folders.")
+    list_parser = subparsers.add_parser("list-keywords", help="List all trainable keyword folders discovered in the dataset.")
+    list_parser.add_argument("--dataset-root", default="dataset/raw")
+
+    inspect_parser = subparsers.add_parser("inspect-dataset", help="Show discovered keywords and available file counts.")
+    inspect_parser.add_argument("--dataset-root", default="dataset/raw")
+    inspect_parser.add_argument("--keyword", default=None)
+
+    analyze_parser = subparsers.add_parser("analyze-keyword", help="Analyze how well a keyword separates from all other sounds.")
+    analyze_parser.add_argument("--dataset-root", default="dataset/raw")
+    analyze_parser.add_argument("--keyword", required=True)
+    analyze_parser.add_argument("--max-positive", type=int, default=None)
+    analyze_parser.add_argument("--max-negative", type=int, default=512)
+    analyze_parser.add_argument("--output-dir", default="models")
+
+    train_parser = subparsers.add_parser("train-template", help="Train a template spotter for one keyword.")
     train_parser.add_argument("--dataset-root", default="dataset/raw")
     train_parser.add_argument("--keyword", default="stop")
-    train_parser.add_argument("--output", default="models/stop_template_spotter.npz")
+    train_parser.add_argument("--output", default=None)
     train_parser.add_argument("--max-positive", type=int, default=None)
     train_parser.add_argument("--max-negative", type=int, default=512)
 
-    predict_parser = subparsers.add_parser("predict", help="Run keyword spotting on a WAV file.")
+    train_all_parser = subparsers.add_parser("train-all", help="Train one template spotter per discovered keyword.")
+    train_all_parser.add_argument("--dataset-root", default="dataset/raw")
+    train_all_parser.add_argument("--output-dir", default="models")
+    train_all_parser.add_argument("--max-positive", type=int, default=None)
+    train_all_parser.add_argument("--max-negative", type=int, default=512)
+
+    predict_parser = subparsers.add_parser("predict", help="Run keyword spotting with a single model on a WAV file.")
     predict_parser.add_argument("--audio", required=True)
     predict_parser.add_argument("--model", default="models/stop_template_spotter.npz")
 
-    inspect_parser = subparsers.add_parser("inspect-dataset", help="Show raw dataset counts used by the spotter.")
-    inspect_parser.add_argument("--dataset-root", default="dataset/raw")
-    inspect_parser.add_argument("--keyword", default="stop")
+    predict_any_parser = subparsers.add_parser("predict-any", help="Run all template models in a directory and return the best keyword match.")
+    predict_any_parser.add_argument("--audio", required=True)
+    predict_any_parser.add_argument("--models-dir", default="models")
 
     return parser
 
@@ -249,15 +446,60 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
+    if args.command == "list-keywords":
+        payload = {
+            "dataset_root": args.dataset_root,
+            "keywords": discover_keywords(args.dataset_root),
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "inspect-dataset":
+        keywords = [resolve_keyword(args.dataset_root, args.keyword)] if args.keyword else discover_keywords(args.dataset_root)
+        payload = {
+            "dataset_root": args.dataset_root,
+            "keywords": keywords,
+            "keyword_file_counts": {
+                keyword: len(list_wav_files(Path(args.dataset_root) / keyword)) for keyword in keywords
+            },
+            "background_negative_files": len(iter_negative_files(args.dataset_root, include_other_keywords=False)),
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "analyze-keyword":
+        _, analysis = analyze_template_keyword(
+            dataset_root=args.dataset_root,
+            keyword=args.keyword,
+            max_positive=args.max_positive,
+            max_negative=args.max_negative,
+            output_dir=args.output_dir,
+        )
+        print(json.dumps(asdict(analysis), indent=2))
+        return 0
+
     if args.command == "train-template":
-        spotter, metrics = train_template_spotter(
+        spotter, analysis = analyze_template_keyword(
             dataset_root=args.dataset_root,
             keyword=args.keyword,
             max_positive=args.max_positive,
             max_negative=args.max_negative,
         )
-        output = spotter.save(args.output)
-        print(json.dumps({"saved_to": str(output), **metrics}, indent=2))
+        output_path = Path(args.output) if args.output else default_model_path(spotter.keyword)
+        output = spotter.save(output_path)
+        payload = asdict(analysis)
+        payload["saved_to"] = str(output)
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "train-all":
+        analyses = train_keyword_collection(
+            dataset_root=args.dataset_root,
+            output_dir=args.output_dir,
+            max_positive=args.max_positive,
+            max_negative=args.max_negative,
+        )
+        print(json.dumps([asdict(analysis) for analysis in analyses], indent=2))
         return 0
 
     if args.command == "predict":
@@ -266,15 +508,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(asdict(prediction), indent=2))
         return 0
 
-    if args.command == "inspect-dataset":
-        dataset_root = Path(args.dataset_root)
-        payload = {
-            "keyword": args.keyword,
-            "positive_files": len(list_wav_files(dataset_root / args.keyword)),
-            "negative_files": len(iter_negative_files(dataset_root)),
-            "negative_folders": list(NEGATIVE_FOLDERS),
-        }
-        print(json.dumps(payload, indent=2))
+    if args.command == "predict-any":
+        ensemble = MultiKeywordTemplateSpotter(load_spotters_from_directory(args.models_dir))
+        prediction = ensemble.predict_file(args.audio)
+        print(json.dumps(asdict(prediction), indent=2))
         return 0
 
     parser.error("Unknown command")
