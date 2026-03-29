@@ -6,13 +6,14 @@ def normalize(audio):
     """Brings the peak volume to a standard level."""
     return audio / (np.max(np.abs(audio)) + 1e-6)
 
-def bandpass_filter(audio, sr, low=300, high=4000):
+def bandpass_filter(audio, sr, low=150, high=4000):
     """Removes frequencies outside the human voice range."""
     nyquist = 0.5 * sr
     low_cut = low / nyquist
     high_cut = high / nyquist
     b, a = butter(5, [low_cut, high_cut], btype='band')
     return lfilter(b, a, audio)
+
 
 def aggressive_noise_reduce(audio, sr):
     """
