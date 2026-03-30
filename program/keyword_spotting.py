@@ -1,3 +1,5 @@
+# Generalized keyword analysis supports any dataset keyword folder.
+
 from __future__ import annotations
 
 import argparse
