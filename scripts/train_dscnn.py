@@ -3,11 +3,12 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from pathlib import Path
+from torch.utils.data import Dataset, DataLoader
 
 from program.feature_extraction import extract_features_from_file
 
 
-# Simple DS-CNN
+# ---------------- MODEL ----------------
 class DSCNN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -20,7 +21,7 @@ class DSCNN(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1))
         )
 
-        self.fc = nn.Linear(32, 2)
+        self.fc = nn.Linear(32, 3)  # 3 classes
 
     def forward(self, x):
         x = self.conv(x)
@@ -28,43 +29,27 @@ class DSCNN(nn.Module):
         return self.fc(x)
 
 
-def load_dataset(dataset_root):
-    X = []
-    y = []
-
-    for label, folder in enumerate(["background_noise", "stop"]):
-        path = Path(dataset_root) / folder
-
-        for file in path.rglob("*.wav"):
-            features = extract_features_from_file(file)
-            X.append(features)
-            y.append(label)
-
-    X = np.array(X)
-    y = np.array(y)
-
-    # reshape for CNN
-    X = np.expand_dims(X, axis=1)
-
-    return torch.tensor(X, dtype=torch.float32), torch.tensor(y)
-
-
-import torch
-from torch.utils.data import Dataset, DataLoader
-from pathlib import Path
-import numpy as np
-
-from program.feature_extraction import extract_features_from_file
-
-
+# ---------------- DATASET ----------------
 class AudioDataset(Dataset):
     def __init__(self, dataset_root):
         self.files = []
         self.labels = []
 
-        for label, folder in enumerate(["background_noise", "stop"]):
+        folders = ["background_noise", "other_speech", "stop"]
+
+        for label, folder in enumerate(folders):
             path = Path(dataset_root) / folder
-            for file in path.rglob("*.wav"):
+            all_files = list(path.rglob("*.wav"))
+
+            # 🔥 Balance dataset manually
+            if folder == "stop":
+                files = all_files[:8000]   # more STOP
+            elif folder == "other_speech":
+                files = all_files[:4000]   # reduce speech
+            else:
+                files = all_files[:5000]   # noise
+
+            for file in files:
                 self.files.append(file)
                 self.labels.append(label)
 
@@ -73,10 +58,11 @@ class AudioDataset(Dataset):
 
     def __getitem__(self, idx):
         features = extract_features_from_file(self.files[idx])
-        features = np.expand_dims(features, axis=0)  # (1, mel, time)
+        features = np.expand_dims(features, axis=0)
         return torch.tensor(features, dtype=torch.float32), self.labels[idx]
 
 
+# ---------------- TRAIN ----------------
 def train():
     print("🔥 Loading dataset...")
 
@@ -84,12 +70,16 @@ def train():
     loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
     model = DSCNN()
-    criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # 🔥 Give more importance to STOP class
+    class_weights = torch.tensor([1.0, 1.0, 2.0])
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     print("🚀 Training...")
 
-    for epoch in range(10):
+    for epoch in range(20):
         total_loss = 0
 
         for X_batch, y_batch in loader:
