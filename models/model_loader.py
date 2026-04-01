@@ -17,7 +17,7 @@ class DSCNN(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1))
         )
 
-        self.fc = nn.Linear(32, 2)
+        self.fc = nn.Linear(32, 3)
 
     def forward(self, x):
         x = self.conv(x)
