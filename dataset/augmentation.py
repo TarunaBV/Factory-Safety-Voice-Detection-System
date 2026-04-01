@@ -17,7 +17,7 @@ os.makedirs(output_not_stop, exist_ok=True)
 #  Parameters
 
 SR = 16000
-NOISE_LEVELS = [0.2, 0.4, 0.6, 0.8]
+NOISE_LEVELS = [0.1, 0.2, 0.3]
 AUG_PER_FILE = 4          # number of noisy versions per STOP
 CHUNK_DURATION = 1.0      # seconds for noise chunks
 
