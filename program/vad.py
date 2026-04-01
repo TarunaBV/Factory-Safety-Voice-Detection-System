@@ -15,7 +15,7 @@ model, utils = torch.hub.load(
 (get_speech_timestamps,
  _, _, _, collect_chunks) = utils
 
-webrtc = webrtcvad.Vad(2)
+webrtc = webrtcvad.Vad(0)
 
 
 def apply_vad(audio):
@@ -28,17 +28,7 @@ def apply_vad(audio):
         if len(frame) == FRAME_SIZE:
             frames.append(frame)
 
-    speech_frames = []
-    for frame in frames:
-        pcm16 = (frame * 32767).astype(np.int16)
-
-        if webrtc.is_speech(pcm16.tobytes(), SAMPLE_RATE):
-            speech_frames.append(frame)
-
-    if len(speech_frames) == 0:
-        return None
-
-    filtered_audio = np.concatenate(speech_frames)
+    filtered_audio = np.concatenate(frames)
 
     audio_tensor = torch.from_numpy(filtered_audio)
 
