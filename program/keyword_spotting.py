@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from program.confidence_gate import apply_confidence_gate
+
 import argparse
 import json
 import re
@@ -494,6 +496,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
+       # ---- TRAIN ALL ----
     if args.command == "train-all":
         analyses = train_keyword_collection(
             dataset_root=args.dataset_root,
@@ -504,18 +507,44 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps([asdict(analysis) for analysis in analyses], indent=2))
         return 0
 
+
+    # ---- PREDICT ----
     if args.command == "predict":
         spotter = load_spotter(args.model)
         prediction = spotter.predict_file(args.audio)
+
+        # 🔥 Apply your confidence gate
+        result = apply_confidence_gate(
+            prediction.label,
+            prediction.score,
+            prediction.threshold
+        )
+
+        print("\n--- Model Output ---")
         print(json.dumps(asdict(prediction), indent=2))
+
+        print("\n--- Confidence Gate Output ---")
+        print(result)
+
+        if result["status"] == "VALID":
+            print("🚨 ALERT TRIGGERED")
+        else:
+            print("Ignored")
+
         return 0
 
+
+    # ---- PREDICT ANY ----
     if args.command == "predict-any":
-        ensemble = MultiKeywordTemplateSpotter(load_spotters_from_directory(args.models_dir))
+        ensemble = MultiKeywordTemplateSpotter(
+            load_spotters_from_directory(args.models_dir)
+        )
         prediction = ensemble.predict_file(args.audio)
         print(json.dumps(asdict(prediction), indent=2))
         return 0
 
+
+    # ---- ERROR ----
     parser.error("Unknown command")
     return 2
 
