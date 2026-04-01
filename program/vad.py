@@ -1,44 +1,57 @@
 import torch
 import numpy as np
+import webrtcvad
 
-# Load model once (important)
+SAMPLE_RATE = 16000
+FRAME_DURATION = 20  # ms
+FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION / 1000)
+
 model, utils = torch.hub.load(
-    repo_or_dir='snakers4/silero-vad',
-    model='silero_vad',
+    'snakers4/silero-vad',
+    'silero_vad',
     force_reload=False
 )
 
 (get_speech_timestamps,
- save_audio,
- read_audio,
- VADIterator,
- collect_chunks) = utils
+ _, _, _, collect_chunks) = utils
 
-SAMPLE_RATE = 16000
+webrtc = webrtcvad.Vad(2)
 
 
 def apply_vad(audio):
-    """
-    Input: numpy array (float32)
-    Output: speech-only numpy array OR None
-    """
 
-    # Convert to torch tensor
-    audio_tensor = torch.from_numpy(audio)
+    audio = audio.astype(np.float32)
 
-    # Get speech segments
-    speech_timestamps = get_speech_timestamps(
-        audio_tensor,
-        model,
-        sampling_rate=SAMPLE_RATE
-    )
+    frames = []
+    for i in range(0, len(audio), FRAME_SIZE):
+        frame = audio[i:i + FRAME_SIZE]
+        if len(frame) == FRAME_SIZE:
+            frames.append(frame)
 
-    # If no speech
+    speech_frames = []
+    for frame in frames:
+        pcm16 = (frame * 32767).astype(np.int16)
+
+        if webrtc.is_speech(pcm16.tobytes(), SAMPLE_RATE):
+            speech_frames.append(frame)
+
+    if len(speech_frames) == 0:
+        return None
+
+    filtered_audio = np.concatenate(speech_frames)
+
+    audio_tensor = torch.from_numpy(filtered_audio)
+
+    with torch.no_grad():
+        speech_timestamps = get_speech_timestamps(
+            audio_tensor,
+            model,
+            sampling_rate=SAMPLE_RATE
+        )
+
     if len(speech_timestamps) == 0:
         return None
 
-    # Extract only speech parts
     speech_audio = collect_chunks(speech_timestamps, audio_tensor)
 
-    # Convert back to numpy
     return speech_audio.numpy()
