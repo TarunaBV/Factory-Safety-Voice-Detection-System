@@ -4,22 +4,20 @@ import numpy as np
 
 
 class DSCNN(nn.Module):
-    def __init__(self, num_classes=2):
+    def __init__(self):
         super().__init__()
 
         self.conv = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(16),
+            nn.Conv2d(1, 16, 3, padding=1),
             nn.ReLU(),
 
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(16, 32, 3, padding=1),
             nn.ReLU(),
 
             nn.AdaptiveAvgPool2d((1, 1))
         )
 
-        self.fc = nn.Linear(32, num_classes)
+        self.fc = nn.Linear(32, 2)
 
     def forward(self, x):
         x = self.conv(x)
@@ -28,16 +26,15 @@ class DSCNN(nn.Module):
 
 
 def load_model(model_path, device="cpu"):
-    model = DSCNN(num_classes=2)
+    model = DSCNN()
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
     return model
 
 
 def predict(model, features):
-    # features shape: (mel, time)
-    features = np.expand_dims(features, axis=0)  # batch
-    features = np.expand_dims(features, axis=0)  # channel
+    features = np.expand_dims(features, axis=0)
+    features = np.expand_dims(features, axis=0)
 
     tensor = torch.tensor(features, dtype=torch.float32)
 
