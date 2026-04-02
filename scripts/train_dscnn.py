@@ -43,9 +43,9 @@ class AudioDataset(Dataset):
 
             # 🔥 Balance dataset manually
             if folder == "stop":
-                files = all_files[:8000]   # more STOP
+                files = all_files[:10000]   # more STOP
             elif folder == "other_speech":
-                files = all_files[:4000]   # reduce speech
+                files = all_files[:7000]   # reduce speech
             else:
                 files = all_files[:5000]   # noise
 
