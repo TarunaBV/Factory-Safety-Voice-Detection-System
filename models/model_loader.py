@@ -1,7 +1,9 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 
+
+LABELS = ["background_noise", "other_speech", "stop"]
 
 class DSCNN(nn.Module):
     def __init__(self):
@@ -10,14 +12,11 @@ class DSCNN(nn.Module):
         self.conv = nn.Sequential(
             nn.Conv2d(1, 16, 3, padding=1),
             nn.ReLU(),
-
             nn.Conv2d(16, 32, 3, padding=1),
             nn.ReLU(),
-
-            nn.AdaptiveAvgPool2d((1, 1))
+            nn.AdaptiveAvgPool2d((1, 1)),
         )
-
-        self.fc = nn.Linear(32, 3)
+        self.fc = nn.Linear(32, len(LABELS))
 
     def forward(self, x):
         x = self.conv(x)
@@ -42,7 +41,8 @@ def predict(model, features):
         output = model(tensor)
         probs = torch.softmax(output, dim=1).numpy()[0]
 
-    label = np.argmax(probs)
-    confidence = probs[label]
+    label_index = int(np.argmax(probs))
+    confidence = float(probs[label_index])
+    label_name = LABELS[label_index]
 
-    return label, confidence
+    return label_index, label_name, confidence
