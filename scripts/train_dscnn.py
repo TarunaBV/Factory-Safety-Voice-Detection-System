@@ -97,11 +97,7 @@ def train():
 
     print("🚀 Training...")
 
-<<<<<<< HEAD
-    for epoch in range(30):
-=======
-    for epoch in range(20):   # 🔥 more epochs
->>>>>>> c176568170ef20e187154ad23f1786bf3c030083
+    for epoch in range(30):   # 🔥 more epochs
         total_loss = 0
 
         for X_batch, y_batch in loader:
