@@ -13,15 +13,23 @@ class DSCNN(nn.Module):
         self.conv = nn.Sequential(
             nn.Conv2d(1, 16, 3, padding=1),
             nn.ReLU(),
+
             nn.Conv2d(16, 32, 3, padding=1),
             nn.ReLU(),
+
+            nn.Conv2d(32, 64, 3, padding=1),  # ✅ ADD THIS
+            nn.ReLU(),
+
             nn.AdaptiveAvgPool2d((1, 1)),
         )
-        self.fc = nn.Linear(32, len(LABELS))
+
+        self.dropout = nn.Dropout(0.3)  # ✅ ADD THIS
+        self.fc = nn.Linear(64, len(LABELS))  # ✅ FIX
 
     def forward(self, x):
         x = self.conv(x)
         x = x.view(x.size(0), -1)
+        x = self.dropout(x)
         return self.fc(x)
 
 
@@ -32,15 +40,15 @@ def load_model(model_path, device="cpu"):
     return model
 
 
-def predict(model, features):
+def predict(model, features, device="cpu"):
     features = np.expand_dims(features, axis=0)
     features = np.expand_dims(features, axis=0)
 
-    tensor = torch.tensor(features, dtype=torch.float32)
+    tensor = torch.tensor(features, dtype=torch.float32).to(device)
 
     with torch.no_grad():
         output = model(tensor)
-        probs = torch.softmax(output, dim=1).numpy()[0]
+        probs = torch.softmax(output, dim=1).cpu().numpy()[0]
 
     label_index = int(np.argmax(probs))
     confidence = float(probs[label_index])
