@@ -2,7 +2,7 @@ import librosa
 import soundfile as sf
 import os
 
-audio, sr = librosa.load("D:\GITHUB\Factory-Safety-Voice-Detection-System\Recording.wav", sr=16000)
+audio, sr = librosa.load("D:/Intenship/Factory Safety Voice Detection/Factory-Safety-Voice-Detection-System/Recording.wav", sr=16000)
 
 chunk_size = sr  # 1 second
 output_dir = "dataset/final/other_speech"

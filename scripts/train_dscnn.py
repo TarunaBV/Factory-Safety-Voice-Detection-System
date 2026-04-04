@@ -79,7 +79,7 @@ def train():
 
     print("🚀 Training...")
 
-    for epoch in range(20):
+    for epoch in range(30):
         total_loss = 0
 
         for X_batch, y_batch in loader:

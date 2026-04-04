@@ -9,9 +9,7 @@ import numpy as np
 from scipy import signal
 from scipy.io import wavfile
 
-
 EPSILON = 1e-10
-
 
 @dataclass(frozen=True)
 class FeatureConfig:
@@ -72,7 +70,6 @@ def build_mel_filterbank(config: FeatureConfig = DEFAULT_CONFIG) -> np.ndarray:
                 right - np.arange(center, right, dtype=np.float32)
             ) / max(right - center, 1)
     return filterbank
-
 
 def _to_float32(audio: np.ndarray) -> np.ndarray:
     audio = np.asarray(audio)

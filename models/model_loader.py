@@ -34,15 +34,11 @@ def load_model(model_path, device="cpu"):
 def predict(model, features):
     features = np.expand_dims(features, axis=0)
     features = np.expand_dims(features, axis=0)
-
     tensor = torch.tensor(features, dtype=torch.float32)
-
     with torch.no_grad():
         output = model(tensor)
         probs = torch.softmax(output, dim=1).numpy()[0]
-
     label_index = int(np.argmax(probs))
     confidence = float(probs[label_index])
     label_name = LABELS[label_index]
-
     return label_index, label_name, confidence
