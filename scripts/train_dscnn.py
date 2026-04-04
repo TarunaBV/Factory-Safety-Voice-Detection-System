@@ -16,16 +16,24 @@ class DSCNN(nn.Module):
         self.conv = nn.Sequential(
             nn.Conv2d(1, 16, 3, padding=1),
             nn.ReLU(),
+
             nn.Conv2d(16, 32, 3, padding=1),
             nn.ReLU(),
+
+            # 🔥 NEW LAYER (better feature extraction)
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.ReLU(),
+
             nn.AdaptiveAvgPool2d((1, 1))
         )
 
-        self.fc = nn.Linear(32, 3)  # 3 classes
+        self.dropout = nn.Dropout(0.3)   # 🔥 prevents overfitting
+        self.fc = nn.Linear(64, 3)
 
     def forward(self, x):
         x = self.conv(x)
         x = x.view(x.size(0), -1)
+        x = self.dropout(x)
         return self.fc(x)
 
 
@@ -41,13 +49,13 @@ class AudioDataset(Dataset):
             path = Path(dataset_root) / folder
             all_files = list(path.rglob("*.wav"))
 
-            # 🔥 Balance dataset manually
+            # 🔥 IMPROVED BALANCING
             if folder == "stop":
-                files = all_files[:10000]   # more STOP
+                files = all_files[:10000]
             elif folder == "other_speech":
-                files = all_files[:7000]   # reduce speech
+                files = all_files[:10000]   # 🔥 increased
             else:
-                files = all_files[:5000]   # noise
+                files = all_files[:8000]   # 🔥 increased
 
             for file in files:
                 self.files.append(file)
@@ -58,7 +66,14 @@ class AudioDataset(Dataset):
 
     def __getitem__(self, idx):
         features = extract_features_from_file(self.files[idx])
+
+        # 🔥 DATA AUGMENTATION (noise injection)
+        if np.random.rand() < 0.3:
+            noise = np.random.normal(0, 0.01, features.shape)
+            features = features + noise
+
         features = np.expand_dims(features, axis=0)
+
         return torch.tensor(features, dtype=torch.float32), self.labels[idx]
 
 
@@ -67,19 +82,26 @@ def train():
     print("🔥 Loading dataset...")
 
     dataset = AudioDataset("dataset/final")
-    loader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+    # 🔥 Increased batch size
+    loader = DataLoader(dataset, batch_size=64, shuffle=True)
 
     model = DSCNN()
 
-    # 🔥 Give more importance to STOP class
-    class_weights = torch.tensor([1.0, 1.0, 2.0])
+    # 🔥 Improved class weights (focus on difficult class)
+    class_weights = torch.tensor([1.0, 1.5, 2.0])
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    # 🔥 Better optimizer settings
+    optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
     print("🚀 Training...")
 
+<<<<<<< HEAD
     for epoch in range(30):
+=======
+    for epoch in range(20):   # 🔥 more epochs
+>>>>>>> c176568170ef20e187154ad23f1786bf3c030083
         total_loss = 0
 
         for X_batch, y_batch in loader:

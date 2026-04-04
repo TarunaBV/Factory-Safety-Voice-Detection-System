@@ -5,12 +5,17 @@ from models.model_loader import load_model, predict
 
 import numpy as np
 import time
+import torch
 
 
 MODEL_PATH = "models/ds_cnn_model.pth"
-model = load_model(MODEL_PATH)
 
-THRESHOLD = 0.75
+# 🔥 DEVICE SUPPORT (CPU/GPU)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+model = load_model(MODEL_PATH, device=DEVICE)
+
+THRESHOLD = 0.7
 
 
 def main():
@@ -34,6 +39,7 @@ def main():
 
             audio_buffer = np.concatenate([audio_buffer, audio_chunk])
 
+            # 🔥 keep only last 1 second audio
             if len(audio_buffer) > BUFFER_SIZE:
                 audio_buffer = audio_buffer[-BUFFER_SIZE:]
 
@@ -57,14 +63,18 @@ def main():
                     print("🔍 Processing speech...")
 
                     features = extract_features(audio_buffer)
-                    label, confidence = predict(model, features)
 
-                    print(f"Prediction: {label}, Confidence: {confidence:.2f}")
+                    # 🔥 FIXED unpacking (3 values now)
+                    label_idx, label_name, confidence = predict(
+                        model, features, device=DEVICE
+                    )
+
+                    print(f"Prediction: {label_name}, Confidence: {confidence:.2f}")
 
                     current_time = time.time()
 
-                    # label 2 = STOP
-                    if label == 2 and confidence > THRESHOLD:
+                    # 🔥 cleaner logic using label_name instead of index
+                    if label_name == "stop" and confidence > THRESHOLD:
                         if current_time - last_detected_time > COOLDOWN_TIME:
                             print(f"🚨 STOP DETECTED! Confidence: {confidence:.2f}")
                             last_detected_time = current_time
