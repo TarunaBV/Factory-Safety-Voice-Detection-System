@@ -31,11 +31,15 @@ class DSCNN(nn.Module):
             nn.BatchNorm2d(64),
             nn.ReLU(),
 
+            nn.Conv2d(64, 128, 3, padding=1),   # 🔥 NEW LAYER
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+
             nn.AdaptiveAvgPool2d((1, 1)),
         )
 
         self.dropout = nn.Dropout(0.3)
-        self.fc = nn.Linear(64, 3)
+        self.fc = nn.Linear(128, 3)
 
     def forward(self, x):
         x = self.conv(x)
@@ -57,12 +61,13 @@ class AudioDataset(Dataset):
             path = Path(dataset_root) / folder
             all_files = list(path.rglob("*.wav"))
 
+            # 🔥 Balanced + prioritized
             if folder == "stop":
                 files = all_files[:10000]
             elif folder == "other_speech":
-                files = all_files[:10000]
-            else:
                 files = all_files[:8000]
+            else:
+                files = all_files[:6000]
 
             for file in files:
                 self.files.append(file)
@@ -74,6 +79,7 @@ class AudioDataset(Dataset):
     def __getitem__(self, idx):
         features = extract_features_from_file(self.files[idx], config=self.config)
 
+        # 🔥 Light augmentation
         if np.random.rand() < 0.3:
             noise = np.random.normal(0, 0.01, features.shape)
             features = features + noise
@@ -85,21 +91,22 @@ class AudioDataset(Dataset):
 
 # ---------------- TRAIN ----------------
 def train():
-    print("Loading dataset...")
+    print("🔥 Loading dataset...")
 
     dataset = AudioDataset("dataset/final")
     loader = DataLoader(dataset, batch_size=64, shuffle=True)
 
     model = DSCNN()
 
+    # 🔥 prioritize STOP
     class_weights = torch.tensor([1.0, 1.5, 2.0])
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    optimizer = optim.Adam(model.parameters(), lr=0.0005)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    print("Training...")
+    print("🚀 Training...")
 
-    for epoch in range(30):
+    for epoch in range(15):   # ⚡ fast + enough
         total_loss = 0.0
 
         for x_batch, y_batch in loader:
@@ -115,7 +122,7 @@ def train():
     Path("models").mkdir(exist_ok=True)
     torch.save(model.state_dict(), "models/ds_cnn_model.pth")
 
-    print("Model saved!")
+    print("✅ Model saved!")
 
 
 if __name__ == "__main__":
