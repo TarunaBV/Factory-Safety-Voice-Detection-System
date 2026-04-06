@@ -15,7 +15,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = load_model(MODEL_PATH, device=DEVICE)
 
-THRESHOLD = 0.70
+THRESHOLD = 0.75
 
 
 def main():

@@ -6,25 +6,26 @@ import torch.nn as nn
 LABELS = ["background_noise", "other_speech", "stop"]
 
 
+# ---------------- MODEL (MATCH TRAINING EXACTLY) ----------------
 class DSCNN(nn.Module):
     def __init__(self):
         super().__init__()
 
         self.conv = nn.Sequential(
             nn.Conv2d(1, 16, 3, padding=1),
+            nn.BatchNorm2d(16),
             nn.ReLU(),
-
             nn.Conv2d(16, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-
-            nn.Conv2d(32, 64, 3, padding=1),  # ✅ ADD THIS
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
-
             nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        self.dropout = nn.Dropout(0.3)  # ✅ ADD THIS
-        self.fc = nn.Linear(64, len(LABELS))  # ✅ FIX
+        self.dropout = nn.Dropout(0.3)
+        self.fc = nn.Linear(64, len(LABELS))
 
     def forward(self, x):
         x = self.conv(x)
@@ -33,13 +34,16 @@ class DSCNN(nn.Module):
         return self.fc(x)
 
 
+# ---------------- LOAD MODEL ----------------
 def load_model(model_path, device="cpu"):
     model = DSCNN()
     model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
     model.eval()
     return model
 
 
+# ---------------- PREDICT ----------------
 def predict(model, features, device="cpu"):
     features = np.expand_dims(features, axis=0)
     features = np.expand_dims(features, axis=0)
