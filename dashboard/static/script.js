@@ -21,7 +21,7 @@ async function fetchHistory() {
 
         if (latest.status === "DANGER") {
             statusBox.className = "current-status-box danger";
-            currentStatus.innerText = "🚨 STOP DETECTED";
+            currentStatus.innerText = "STOP DETECTED";
         } else {
             statusBox.className = "current-status-box normal";
             currentStatus.innerText = "LISTENING";
@@ -48,6 +48,5 @@ async function fetchHistory() {
     }
 }
 
-// 🔁 FAST REFRESH
 setInterval(fetchHistory, 800);
 fetchHistory();
