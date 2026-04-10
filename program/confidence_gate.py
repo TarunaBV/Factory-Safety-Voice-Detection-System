@@ -29,7 +29,7 @@ def apply_confidence_gate(label, confidence, threshold):
 
     label = label.lower()
 
-    # 🔥 Apply adaptive threshold
+    # Apply adaptive threshold
     dynamic_threshold = calculate_dynamic_threshold(confidence, threshold)
 
     # Decision logic
