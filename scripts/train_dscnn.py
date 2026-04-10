@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from program.feature_extraction import FeatureConfig, extract_features_from_file
 
 
-# ---------------- MODEL ----------------
+# Model
 class DSCNN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -31,7 +31,7 @@ class DSCNN(nn.Module):
             nn.BatchNorm2d(64),
             nn.ReLU(),
 
-            nn.Conv2d(64, 128, 3, padding=1),   # 🔥 NEW LAYER
+            nn.Conv2d(64, 128, 3, padding=1),  
             nn.BatchNorm2d(128),
             nn.ReLU(),
 
@@ -48,7 +48,7 @@ class DSCNN(nn.Module):
         return self.fc(x)
 
 
-# ---------------- DATASET ----------------
+# Dataset
 class AudioDataset(Dataset):
     def __init__(self, dataset_root):
         self.files = []
@@ -61,7 +61,7 @@ class AudioDataset(Dataset):
             path = Path(dataset_root) / folder
             all_files = list(path.rglob("*.wav"))
 
-            # 🔥 Balanced + prioritized
+            
             if folder == "stop":
                 files = all_files[:10000]
             elif folder == "other_speech":
@@ -79,7 +79,7 @@ class AudioDataset(Dataset):
     def __getitem__(self, idx):
         features = extract_features_from_file(self.files[idx], config=self.config)
 
-        # 🔥 Light augmentation
+        # Light augmentation
         if np.random.rand() < 0.3:
             noise = np.random.normal(0, 0.01, features.shape)
             features = features + noise
@@ -89,24 +89,24 @@ class AudioDataset(Dataset):
         return torch.tensor(features, dtype=torch.float32), self.labels[idx]
 
 
-# ---------------- TRAIN ----------------
+# Training
 def train():
-    print("🔥 Loading dataset...")
+    print("Loading dataset...")
 
     dataset = AudioDataset("dataset/final")
     loader = DataLoader(dataset, batch_size=64, shuffle=True)
 
     model = DSCNN()
 
-    # 🔥 prioritize STOP
+    # prioritize STOP
     class_weights = torch.tensor([1.0, 1.5, 2.0])
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    print("🚀 Training...")
+    print("Training...")
 
-    for epoch in range(15):   # ⚡ fast + enough
+    for epoch in range(15):
         total_loss = 0.0
 
         for x_batch, y_batch in loader:
