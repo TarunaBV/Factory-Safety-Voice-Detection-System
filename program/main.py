@@ -10,7 +10,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
 
-# 🔥 YOUR WORKING LOGIC IMPORTS
 from program.audio_input import get_audio_stream, read_audio_chunk, close_stream
 from program.vad import apply_vad
 from program.feature_extraction import extract_features
@@ -18,9 +17,7 @@ from models.model_loader import load_model, predict
 
 from database.crud import init_db, add_detection, get_history
 
-# =========================
-# 🚀 FASTAPI SETUP
-# =========================
+# Fast API setp
 app = FastAPI()
 
 init_db()
@@ -28,16 +25,12 @@ init_db()
 app.mount("/static", StaticFiles(directory="dashboard/static"), name="static")
 templates = Jinja2Templates(directory="dashboard/templates")
 
-# =========================
-# 🧠 MODEL
-# =========================
+# Model
 model = load_model("models/ds_cnn_model.pth")
 
 THRESHOLD = 0.8
 
-# =========================
-# 🎤 BACKGROUND AUDIO LOOP
-# =========================
+#Background Audio Loop
 def audio_detection_loop():
     print("🎤 Background listening started...")
 
@@ -72,7 +65,7 @@ def audio_detection_loop():
             if label_name == "stop" and conf > THRESHOLD:
                 if time.time() - last_time > COOLDOWN:
 
-                    print("💾 SAVING TO DB...")
+                    print("SAVING TO DB...")
 
                     record = add_detection(
                         keyword_detected="stop",
@@ -80,16 +73,14 @@ def audio_detection_loop():
                         confidence=float(conf)
                     )
 
-                    print("✅ SAVED:", record.id)
+                    print("SAVED:", record.id)
 
                     last_time = time.time()
 
         except Exception as e:
             print("Error in audio loop:", e)
 
-# =========================
-# 🌐 ROUTES
-# =========================
+# Routes
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse(
@@ -121,9 +112,7 @@ async def history():
         }
     )
 
-# =========================
-# 🚀 START EVERYTHING
-# =========================
+
 def start_server():
     uvicorn.run("program.main:app",
                 host="127.0.0.1",
@@ -135,11 +124,11 @@ def open_browser():
     webbrowser.open("http://127.0.0.1:8000")
 
 if __name__ == "__main__":
-    # 🎤 Start audio detection in background
+    # Start audio detection in background
     threading.Thread(target=audio_detection_loop, daemon=True).start()
 
-    # 🌐 Open browser
+    # Open browser
     threading.Thread(target=open_browser).start()
 
-    # 🚀 Run server
+    # Run server
     start_server()
