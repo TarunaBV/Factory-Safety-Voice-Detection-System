@@ -18,17 +18,18 @@ async function fetchHistory() {
         }
 
         const latest = json.data[0];
+        const now = Date.now() / 1000;
+        const age = now - latest.raw_timestamp;
 
-        if (latest.status === "DANGER") {
+        if (latest.status === "DANGER" && age < 5) {
             statusBox.className = "current-status-box danger";
-            currentStatus.innerText = "STOP DETECTED";
+            currentStatus.innerText = "🚨 STOP DETECTED";
+            currentKeyword.innerText = `LATEST EVENT: ${latest.keyword_detected.toUpperCase()} (${(latest.confidence * 100).toFixed(1)}%)`;
         } else {
             statusBox.className = "current-status-box normal";
-            currentStatus.innerText = "LISTENING";
+            currentStatus.innerText = "LIVE MONITORING";
+            currentKeyword.innerText = "STATION SECURE - LISTENING...";
         }
-
-        currentKeyword.innerText =
-            `Detected: ${latest.keyword_detected} (${(latest.confidence * 100).toFixed(1)}%)`;
 
         json.data.forEach(item => {
             const tr = document.createElement("tr");
@@ -48,5 +49,6 @@ async function fetchHistory() {
     }
 }
 
+// 🔁 FAST REFRESH
 setInterval(fetchHistory, 800);
 fetchHistory();
