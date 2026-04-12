@@ -49,6 +49,6 @@ async function fetchHistory() {
     }
 }
 
-// 🔁 FAST REFRESH
+// Fast refresh
 setInterval(fetchHistory, 800);
 fetchHistory();
