@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-LABELS = ["background_noise", "other_speech", "stop"]
+LABELS = ["background_noise", "other_speech", "stop", "fire", "help"]
 
 
 class DSCNN(nn.Module):
@@ -30,7 +30,7 @@ class DSCNN(nn.Module):
         )
 
         self.dropout = nn.Dropout(0.3)
-        self.fc = nn.Linear(128, 3)
+        self.fc = nn.Linear(128, len(LABELS))
 
     def forward(self, x):
         x = self.conv(x)
