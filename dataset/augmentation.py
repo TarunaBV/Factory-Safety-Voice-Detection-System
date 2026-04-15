@@ -10,13 +10,13 @@ speech_dir = "dataset/raw/stop"
 output_stop = "dataset/final/stop"
 
 # NEW
-help_dir = "dataset/raw/help"
-fire_dir = "dataset/raw/fire"
+help_dir = "dataset/raw/Help"
+fire_dir = "dataset/raw/Fire"
 
 output_help = "dataset/final/help"
 output_fire = "dataset/final/fire"
 
-noise_dir = "dataset/raw/background_noise"
+noise_dir = "dataset/raw/_background_noise_"
 
 # Create folders
 os.makedirs(output_stop, exist_ok=True)
