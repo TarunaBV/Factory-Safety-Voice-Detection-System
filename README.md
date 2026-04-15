@@ -28,6 +28,34 @@ factory-safety-voice-detection/
 │   ├── config.py
 │   └── logger.py
 │
+├── dataset/
+│   ├── final/
+│   │   ├── background_noise/
+│   │   │   └── ...
+│   │   ├── other_speech/
+│   │   │   └── ...
+│   │   ├── stop/
+│   │   │   └── ...
+│   │   ├── fire/
+│   │   │   └── ...
+│   │   └── help/
+│   │       └── ...
+│   │
+│   ├── raw/
+│   │   ├── background_noise/
+│   │   │   └── ...
+│   │   ├── other_speech/
+│   │   │   └── ...
+│   │   ├── stop/
+│   │   │   └── ...
+│   │   ├── fire/
+│   │   │   └── ...
+│   │   └── help/
+│   │       └── ...
+│   │
+│   ├── augmentation.py
+│   └── dataset_loader.py
+│
 ├── program/
 │   ├── audio_input.py
 │   ├── vad.py
@@ -41,6 +69,7 @@ factory-safety-voice-detection/
 ├── models/
 │   ├── ds_cnn_model.pth
 │   ├── labels.txt
+│   ├── stop_template_spotter.npz
 │   └── model_loader.py
 │
 ├── data/
