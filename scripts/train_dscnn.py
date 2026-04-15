@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 from pathlib import Path
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, random_split
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -13,9 +13,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from program.feature_extraction import FeatureConfig, extract_features_from_file
 
+
 LABELS = ["background_noise", "other_speech", "stop", "fire", "help"]
 
-# Model
+
+# 🔥 MODEL
 class DSCNN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -50,6 +52,7 @@ class DSCNN(nn.Module):
         return self.fc(x)
 
 
+# 🔥 DATASET
 class AudioDataset(Dataset):
     def __init__(self, dataset_root):
         self.files = []
@@ -58,11 +61,11 @@ class AudioDataset(Dataset):
         self.config = FeatureConfig(pre_emphasis=0.97)
 
         MAX_SAMPLES = {
-            "background_noise": 6000,
-            "other_speech": 8000,
-            "stop": 9000,
-            "fire": 9000,
-            "help": 9000
+            "background_noise": 4000,
+            "other_speech": 4000,
+            "stop": 4000,
+            "fire": 4000,
+            "help": 4000
         }
 
         for label_idx, folder in enumerate(LABELS):
@@ -74,10 +77,8 @@ class AudioDataset(Dataset):
 
             all_files = list(path.rglob("*.wav"))
 
-            max_count = MAX_SAMPLES.get(folder, len(all_files))
-
-            if len(all_files) > max_count:
-                files = random.sample(all_files, max_count)
+            if len(all_files) > MAX_SAMPLES[folder]:
+                files = random.sample(all_files, MAX_SAMPLES[folder])
             else:
                 files = all_files
 
@@ -85,7 +86,7 @@ class AudioDataset(Dataset):
                 self.files.append(file)
                 self.labels.append(label_idx)
 
-        print(f"Total samples loaded: {len(self.files)}")
+        print(f"✅ Total samples loaded: {len(self.files)}")
 
     def __len__(self):
         return len(self.files)
@@ -93,6 +94,7 @@ class AudioDataset(Dataset):
     def __getitem__(self, idx):
         features = extract_features_from_file(self.files[idx], config=self.config)
 
+        # 🔥 augmentation
         if np.random.rand() < 0.3:
             noise = np.random.normal(0, 0.01, features.shape)
             features = features + noise
@@ -102,21 +104,28 @@ class AudioDataset(Dataset):
         return torch.tensor(features, dtype=torch.float32), self.labels[idx]
 
 
-# Training
+# 🔥 TRAINING WITH EARLY STOPPING
 def train():
     print("🚀 Loading dataset...")
 
     dataset = AudioDataset("dataset/final")
-    loader = DataLoader(dataset, batch_size=64, shuffle=True)
+
+    # 🔥 Train / Validation split
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_ds, val_ds = random_split(dataset, [train_size, val_size])
+
+    train_loader = DataLoader(train_ds, batch_size=128, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=128)
 
     model = DSCNN()
 
     class_weights = torch.tensor([
-        1.0,  # background_noise
-        1.5,  # other_speech
-        2.0,  # STOP
-        2.0,  # FIRE
-        2.0   # HELP
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
     ])
 
     criterion = nn.CrossEntropyLoss(weight=class_weights)
@@ -124,24 +133,52 @@ def train():
 
     print("🔥 Training started...")
 
-    for epoch in range(20):
-        total_loss = 0.0
+    best_val_loss = float("inf")
+    patience = 6
+    counter = 0
 
-        for x_batch, y_batch in loader:
+    for epoch in range(60):
+        # ---- TRAIN ----
+        model.train()
+        train_loss = 0.0
+
+        for x_batch, y_batch in train_loader:
             optimizer.zero_grad()
             outputs = model(x_batch)
             loss = criterion(outputs, y_batch)
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item()
+            train_loss += loss.item()
 
-        print(f"Epoch {epoch + 1}, Loss: {total_loss:.4f}")
+        # ---- VALIDATION ----
+        model.eval()
+        val_loss = 0.0
 
-    Path("models").mkdir(exist_ok=True)
-    torch.save(model.state_dict(), "models/ds_cnn_model.pth")
+        with torch.no_grad():
+            for x_batch, y_batch in val_loader:
+                outputs = model(x_batch)
+                loss = criterion(outputs, y_batch)
+                val_loss += loss.item()
 
-    print("✅ Model trained & saved successfully!")
+        print(f"Epoch {epoch+1} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+
+        # 🔥 EARLY STOPPING
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            counter = 0
+
+            Path("models").mkdir(exist_ok=True)
+            torch.save(model.state_dict(), "models/ds_cnn_model.pth")
+            print("✅ Model improved & saved!")
+
+        else:
+            counter += 1
+            print(f"⚠️ No improvement ({counter}/{patience})")
+
+            if counter >= patience:
+                print("🛑 Early stopping triggered!")
+                break
 
 
 if __name__ == "__main__":
