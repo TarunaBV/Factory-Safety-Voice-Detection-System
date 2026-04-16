@@ -1,3 +1,5 @@
+from xml.parsers.expat import model
+
 import numpy as np
 import sys
 import torch
@@ -42,7 +44,7 @@ class DSCNN(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        self.dropout = nn.Dropout(0.3)
+        self.dropout = nn.Dropout(0.5)
         self.fc = nn.Linear(128, len(LABELS))
 
     def forward(self, x):
@@ -95,9 +97,14 @@ class AudioDataset(Dataset):
         features = extract_features_from_file(self.files[idx], config=self.config)
 
         # 🔥 augmentation
-        if np.random.rand() < 0.3:
-            noise = np.random.normal(0, 0.01, features.shape)
+        if np.random.rand() < 0.5:
+            noise = np.random.normal(0, 0.02, features.shape)
             features = features + noise
+
+        # Random time shift (VERY IMPORTANT for audio)
+        if np.random.rand() < 0.3:
+            shift = np.random.randint(-5, 5)
+            features = np.roll(features, shift, axis=1)
 
         features = np.expand_dims(features, axis=0)
 
@@ -122,19 +129,26 @@ def train():
 
     class_weights = torch.tensor([
         1.0,
-        1.0,
-        1.0,
-        1.0,
-        1.0
+        0.7,
+        1.5,
+        1.5,
+        1.5
     ])
 
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer,
+    mode='min',
+    factor=0.5,
+    patience=2,
+    verbose=True
+    )
 
     print("🔥 Training started...")
 
     best_val_loss = float("inf")
-    patience = 6
+    patience = 4
     counter = 0
 
     for epoch in range(60):
@@ -149,7 +163,9 @@ def train():
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item()
+            train_loss += loss.item() * x_batch.size(0)
+
+        train_loss /= len(train_loader.dataset)
 
         # ---- VALIDATION ----
         model.eval()
@@ -159,7 +175,11 @@ def train():
             for x_batch, y_batch in val_loader:
                 outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
-                val_loss += loss.item()
+                val_loss += loss.item() * x_batch.size(0)
+
+        val_loss /= len(val_loader.dataset)
+
+        scheduler.step(val_loss)
 
         print(f"Epoch {epoch+1} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
