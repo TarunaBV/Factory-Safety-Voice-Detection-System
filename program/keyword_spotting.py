@@ -197,13 +197,35 @@ class TemplateKeywordSpotter:
         audio = np.asarray(audio, dtype=np.float32).reshape(-1)
 
         if audio.size <= window_samples:
-            features = extract_features(pad_or_trim(audio, window_samples), config=self.config)
-            prediction = self.predict_features(features)
-            prediction.best_window_start_ms = 0
-            return prediction
+            padded_candidates = [pad_or_trim(audio, window_samples)]
+            if audio.size < window_samples:
+                centered = np.zeros(window_samples, dtype=np.float32)
+                centered_start = (window_samples - audio.size) // 2
+                centered[centered_start : centered_start + audio.size] = audio
+
+                right_aligned = np.zeros(window_samples, dtype=np.float32)
+                right_aligned[-audio.size :] = audio
+
+                padded_candidates.extend([centered, right_aligned])
+
+            best_prediction: KeywordPrediction | None = None
+            for candidate in padded_candidates:
+                features = extract_features(candidate, config=self.config)
+                prediction = self.predict_features(features)
+                prediction.best_window_start_ms = 0
+                if best_prediction is None or prediction.score > best_prediction.score:
+                    best_prediction = prediction
+
+            assert best_prediction is not None
+            return best_prediction
 
         best_prediction: KeywordPrediction | None = None
-        for start in range(0, audio.size - window_samples + 1, hop_samples):
+        starts = list(range(0, audio.size - window_samples + 1, hop_samples))
+        final_start = audio.size - window_samples
+        if final_start not in starts:
+            starts.append(final_start)
+
+        for start in starts:
             window = audio[start : start + window_samples]
             features = extract_features(window, config=self.config)
             prediction = self.predict_features(features)
@@ -527,7 +549,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result)
 
         if result["status"] == "VALID":
-            print("🚨 ALERT TRIGGERED")
+            print("ALERT TRIGGERED")
         else:
             print("Ignored")
 

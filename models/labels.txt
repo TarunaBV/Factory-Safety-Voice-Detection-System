@@ -1,0 +1,5 @@
+background_noise
+other_speech
+stop
+fire
+help

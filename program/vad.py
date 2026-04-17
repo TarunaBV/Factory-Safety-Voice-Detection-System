@@ -1,6 +1,11 @@
 import torch
 import numpy as np
-import webrtcvad
+from pathlib import Path
+
+
+TORCH_HUB_DIR = Path(__file__).resolve().parents[1] / ".cache" / "torch" / "hub"
+TORCH_HUB_DIR.mkdir(parents=True, exist_ok=True)
+torch.hub.set_dir(str(TORCH_HUB_DIR))
 
 SAMPLE_RATE = 16000
 FRAME_DURATION = 20  # ms
@@ -9,14 +14,12 @@ FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION / 1000)
 model, utils = torch.hub.load(
     'snakers4/silero-vad',
     'silero_vad',
-    force_reload=False
+    force_reload=False,
+    trust_repo=True,
 )
 
 (get_speech_timestamps,
  _, _, _, collect_chunks) = utils
-
-webrtc = webrtcvad.Vad(0)
-
 
 def apply_vad(audio):
 
