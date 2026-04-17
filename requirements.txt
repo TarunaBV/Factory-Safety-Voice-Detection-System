@@ -1,0 +1,8 @@
+numpy
+scipy
+torch
+torchaudio
+sounddevice
+pytest
+groq
+flask

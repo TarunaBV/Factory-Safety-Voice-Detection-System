@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Factory Safety Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── HEADER ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 24px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+    }
+    header .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 6px #22c55e;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; color: #f0f0f0; }
+    header span { font-size: 0.8rem; color: #8b949e; margin-left: auto; }
+
+    /* ── MAIN LAYOUT ── */
+    .layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      width: 320px;
+      background: #161b22;
+      border-right: 1px solid #30363d;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-title {
+      padding: 14px 16px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #8b949e;
+      border-bottom: 1px solid #30363d;
+    }
+    .events-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    .events-list::-webkit-scrollbar { width: 4px; }
+    .events-list::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+
+    .event-card {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      cursor: default;
+      transition: border-color 0.2s;
+    }
+    .event-card:hover { border-color: #58a6ff; }
+    .event-card .badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge.critical { background: #3d1a1a; color: #f85149; border: 1px solid #f85149; }
+    .badge.high     { background: #2d1f0a; color: #f0883e; border: 1px solid #f0883e; }
+    .badge.medium   { background: #1f2a0a; color: #a8cc34; border: 1px solid #a8cc34; }
+    .event-card .kw {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #f0f0f0;
+      margin-bottom: 2px;
+    }
+    .event-card .meta {
+      font-size: 0.72rem;
+      color: #8b949e;
+    }
+
+    /* ── CHAT AREA ── */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid #30363d;
+      font-size: 0.8rem;
+      color: #8b949e;
+      background: #0f1117;
+    }
+    .chat-header strong { color: #58a6ff; }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .messages::-webkit-scrollbar { width: 4px; }
+    .messages::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+
+    .msg {
+      display: flex;
+      gap: 10px;
+      max-width: 80%;
+    }
+    .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+    .msg.assistant { align-self: flex-start; }
+
+    .avatar {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+    .msg.user .avatar     { background: #1f6feb; color: #fff; }
+    .msg.assistant .avatar { background: #21262d; color: #58a6ff; border: 1px solid #30363d; }
+
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 0.88rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+    .msg.user .bubble {
+      background: #1f6feb;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.assistant .bubble {
+      background: #161b22;
+      color: #e0e0e0;
+      border: 1px solid #30363d;
+      border-bottom-left-radius: 4px;
+    }
+
+    .typing .bubble {
+      display: flex; gap: 4px; align-items: center;
+      padding: 12px 16px;
+    }
+    .typing .bubble span {
+      width: 7px; height: 7px;
+      background: #58a6ff;
+      border-radius: 50%;
+      animation: bounce 1.2s infinite;
+    }
+    .typing .bubble span:nth-child(2) { animation-delay: 0.2s; }
+    .typing .bubble span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40% { transform: translateY(-6px); }
+    }
+
+    /* ── INPUT BAR ── */
+    .input-bar {
+      padding: 16px 20px;
+      border-top: 1px solid #30363d;
+      background: #0f1117;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .input-bar textarea {
+      flex: 1;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      color: #e0e0e0;
+      font-size: 0.88rem;
+      padding: 10px 14px;
+      resize: none;
+      outline: none;
+      max-height: 120px;
+      line-height: 1.5;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+    .input-bar textarea:focus { border-color: #58a6ff; }
+    .input-bar textarea::placeholder { color: #484f58; }
+
+    .send-btn {
+      background: #1f6feb;
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      width: 40px; height: 40px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    .send-btn:hover { background: #388bfd; }
+    .send-btn:disabled { background: #21262d; cursor: not-allowed; }
+    .send-btn svg { width: 18px; height: 18px; }
+
+    /* ── SUGGESTIONS ── */
+    .suggestions {
+      padding: 0 20px 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chip {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 20px;
+      padding: 5px 12px;
+      font-size: 0.78rem;
+      color: #8b949e;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .chip:hover { border-color: #58a6ff; color: #58a6ff; }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: #484f58;
+    }
+    .empty-state svg { width: 40px; height: 40px; opacity: 0.4; }
+    .empty-state p { font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <h1>🏭 Factory Safety Voice Detection</h1>
+  <span id="event-count">Loading...</span>
+</header>
+
+<div class="layout">
+
+  <!-- SIDEBAR: recent alerts -->
+  <aside class="sidebar">
+    <div class="sidebar-title">Recent Alerts</div>
+    <div class="events-list" id="events-list">
+      <div style="padding:16px; color:#484f58; font-size:0.8rem;">Loading events...</div>
+    </div>
+  </aside>
+
+  <!-- CHAT -->
+  <div class="chat-area">
+    <div class="chat-header">
+      Ask <strong>Safety Assistant</strong> anything about the logged alerts
+    </div>
+
+    <div class="messages" id="messages">
+      <div class="empty-state" id="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2z"/>
+          <path d="M12 8v4l3 3"/>
+        </svg>
+        <p>Ask a question about your safety alerts</p>
+      </div>
+    </div>
+
+    <div class="suggestions" id="suggestions">
+      <div class="chip" onclick="sendChip(this)">How many alerts were logged?</div>
+      <div class="chip" onclick="sendChip(this)">Which had confidence above 0.80?</div>
+      <div class="chip" onclick="sendChip(this)">Show alerts by detection source</div>
+      <div class="chip" onclick="sendChip(this)">Were there any fire alerts?</div>
+    </div>
+
+    <div class="input-bar">
+      <textarea id="input" rows="1" placeholder="Ask about your safety alerts..." onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button class="send-btn" id="send-btn" onclick="sendMessage()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const messagesEl = document.getElementById("messages");
+  const inputEl    = document.getElementById("input");
+  const sendBtn    = document.getElementById("send-btn");
+  const emptyState = document.getElementById("empty-state");
+
+  // ── Load sidebar events ──
+  async function loadEvents() {
+    try {
+      const res  = await fetch("/api/events");
+      const data = await res.json();
+      document.getElementById("event-count").textContent =
+        `${data.length} alert${data.length !== 1 ? "s" : ""} logged`;
+      renderEvents(data.reverse());
+    } catch {
+      document.getElementById("event-count").textContent = "Could not load events";
+    }
+  }
+
+  function renderEvents(events) {
+    const el = document.getElementById("events-list");
+    if (!events.length) {
+      el.innerHTML = `<div style="padding:16px;color:#484f58;font-size:0.8rem;">No events yet.</div>`;
+      return;
+    }
+    el.innerHTML = events.map(e => {
+      const dt = e.timestamp
+        ? new Date(e.timestamp * 1000).toLocaleString()
+        : "unknown";
+      const sev = e.severity || "medium";
+      return `
+        <div class="event-card">
+          <span class="badge ${sev}">${sev}</span>
+          <div class="kw">🔑 ${e.keyword} — ${e.alarm_type}</div>
+          <div class="meta">
+            conf ${(e.confidence * 100).toFixed(0)}% · ${e.zone} · ${e.device_id}<br/>
+            ${dt}
+          </div>
+        </div>`;
+    }).join("");
+  }
+
+  // ── Chat ──
+  function appendMsg(role, text) {
+    emptyState.style.display = "none";
+    const div = document.createElement("div");
+    div.className = `msg ${role}`;
+    const avatar = role === "user" ? "You" : "🤖";
+    div.innerHTML = `
+      <div class="avatar">${avatar}</div>
+      <div class="bubble">${text}</div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  function showTyping() {
+    emptyState.style.display = "none";
+    const div = document.createElement("div");
+    div.className = "msg assistant typing";
+    div.id = "typing";
+    div.innerHTML = `
+      <div class="avatar">🤖</div>
+      <div class="bubble"><span></span><span></span><span></span></div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function removeTyping() {
+    const t = document.getElementById("typing");
+    if (t) t.remove();
+  }
+
+  async function sendMessage() {
+    const question = inputEl.value.trim();
+    if (!question) return;
+
+    appendMsg("user", question);
+    inputEl.value = "";
+    autoResize(inputEl);
+    sendBtn.disabled = true;
+    document.getElementById("suggestions").style.display = "none";
+    showTyping();
+
+    try {
+      const res  = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const data = await res.json();
+      removeTyping();
+      appendMsg("assistant", data.answer || data.error || "No response.");
+    } catch {
+      removeTyping();
+      appendMsg("assistant", "❌ Could not reach the server.");
+    }
+
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+
+  function sendChip(el) {
+    inputEl.value = el.textContent;
+    sendMessage();
+  }
+
+  function handleKey(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function autoResize(el) {
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 120) + "px";
+  }
+
+  loadEvents();
+</script>
+</body>
+</html>
