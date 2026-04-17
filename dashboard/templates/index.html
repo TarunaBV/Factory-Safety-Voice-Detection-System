@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Factory Safety Voice Detection</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+
+<body>
+
+<div class="dashboard-container">
+
+    <!-- 🔥 HEADER -->
+    <header>
+        <h1>Voice Detection Monitor</h1>
+        <p>Real-time factory safety acoustic analyzer</p>
+    </header>
+
+    <!-- 🎤 STATUS PANEL -->
+    <section class="controls-panel">
+
+        <!-- ❌ Removed mic logic -->
+        <div class="mic-status">
+            <button class="record-btn idle" disabled>
+                <span>SYSTEM RUNNING</span>
+            </button>
+        </div>
+
+        <!-- 🔥 LIVE STATUS -->
+        <div class="current-status-box" id="statusBox">
+            <h2 id="currentStatus">LISTENING</h2>
+            <p id="currentKeyword">Waiting for STOP...</p>
+        </div>
+
+        <!-- 📝 LIVE TRANSCRIPT -->
+        <div class="transcript-box">
+            <h4>Live Conversation Transcript:</h4>
+            <p id="liveTranscript">Fetching audio...</p>
+        </div>
+
+    </section>
+
+    <!-- 📊 HISTORY -->
+    <section class="history-panel">
+        <h3>Detection History</h3>
+
+        <div class="table-container">
+            <table id="historyTable">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Status</th>
+                        <th>Detected Keyword</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+
+                <tbody id="historyBody">
+                    <!-- Filled by JS -->
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+</div>
+
+<!-- 🔥 SCRIPT -->
+<script src="/static/script.js"></script>
+
+</body>
+</html>

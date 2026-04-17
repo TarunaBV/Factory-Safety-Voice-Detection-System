@@ -24,6 +24,7 @@ class FeatureConfig:
     fmin: float = 20.0
     fmax: float = 7600.0
     normalize: bool = True
+    pre_emphasis: float = 0.0
 
     @property
     def clip_samples(self) -> int:
@@ -111,6 +112,16 @@ def normalize_audio(audio: np.ndarray) -> np.ndarray:
     return np.asarray(audio / peak, dtype=np.float32)
 
 
+def apply_pre_emphasis(audio: np.ndarray, coeff: float) -> np.ndarray:
+    if coeff <= 0.0:
+        return np.asarray(audio, dtype=np.float32)
+    audio = np.asarray(audio, dtype=np.float32)
+    emphasized = np.empty_like(audio)
+    emphasized[0] = audio[0]
+    emphasized[1:] = audio[1:] - coeff * audio[:-1]
+    return emphasized
+
+
 def mix_with_noise(
     audio: np.ndarray,
     noise_audio: np.ndarray,
@@ -135,6 +146,8 @@ def frames_from_audio(audio: np.ndarray, config: FeatureConfig = DEFAULT_CONFIG)
     audio = pad_or_trim(audio, config.clip_samples)
     if config.normalize:
         audio = normalize_audio(audio)
+    if config.pre_emphasis > 0.0:
+        audio = apply_pre_emphasis(audio, config.pre_emphasis)
     _, _, spectrum = signal.stft(
         audio,
         fs=config.sample_rate,

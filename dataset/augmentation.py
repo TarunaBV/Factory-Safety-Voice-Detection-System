@@ -5,23 +5,29 @@ import soundfile as sf
 import random
 
 
-speech_dir = "dataset/raw/stop"   # STOP data
-noise_dir = "dataset/raw/background_noise"     # long noise files
-
+# Existing
+speech_dir = "dataset/raw/stop"
 output_stop = "dataset/final/stop"
-output_not_stop = "dataset/final/not_stop"
 
+# NEW
+help_dir = "dataset/raw/Help"
+fire_dir = "dataset/raw/Fire"
+
+output_help = "dataset/final/help"
+output_fire = "dataset/final/fire"
+
+noise_dir = "dataset/raw/_background_noise_"
+
+# Create folders
 os.makedirs(output_stop, exist_ok=True)
-os.makedirs(output_not_stop, exist_ok=True)
+os.makedirs(output_help, exist_ok=True)
+os.makedirs(output_fire, exist_ok=True)
 
-#  Parameters
 
 SR = 16000
 NOISE_LEVELS = [0.1, 0.2, 0.3]
-AUG_PER_FILE = 4          # number of noisy versions per STOP
-CHUNK_DURATION = 1.0      # seconds for noise chunks
+AUG_PER_FILE = 4
 
-# Utility Functions
 
 def load_audio(path):
     audio, _ = librosa.load(path, sr=SR)
@@ -55,67 +61,44 @@ def mix_audio(speech, noise, level):
 
     return normalize(mixed)
 
-def split_noise_into_chunks(noise, chunk_size):
-    chunks = []
-    for i in range(0, len(noise), chunk_size):
-        chunk = noise[i:i + chunk_size]
-        if len(chunk) == chunk_size:
-            chunks.append(chunk)
-    return chunks
 
-# CREATE STOP DATASET
-
-speech_files = os.listdir(speech_dir)
 noise_files = os.listdir(noise_dir)
 
-print("Creating STOP dataset...")
+def create_keyword_dataset(speech_dir, output_dir, label_name):
+    speech_files = os.listdir(speech_dir)
 
-stop_count = 0
+    print(f"\n🔥 Creating {label_name.upper()} dataset...")
 
-for speech_file in speech_files:
-    speech_path = os.path.join(speech_dir, speech_file)
-    speech = load_audio(speech_path)
+    count = 0
 
-    # Save clean STOP
-    sf.write(f"{output_stop}/stop_clean_{stop_count}.wav", speech, SR)
-    stop_count += 1
+    for speech_file in speech_files:
+        speech_path = os.path.join(speech_dir, speech_file)
+        speech = load_audio(speech_path)
 
-    # Generate noisy versions
-    for _ in range(AUG_PER_FILE):
-        noise_file = random.choice(noise_files)
-        noise_path = os.path.join(noise_dir, noise_file)
+        # Save clean
+        sf.write(f"{output_dir}/{label_name}_clean_{count}.wav", speech, SR)
+        count += 1
 
-        noise = load_audio(noise_path)
-        noise_segment = get_random_noise_segment(noise, len(speech))
+        # Augment
+        for _ in range(AUG_PER_FILE):
+            noise_file = random.choice(noise_files)
+            noise_path = os.path.join(noise_dir, noise_file)
 
-        level = random.choice(NOISE_LEVELS)
+            noise = load_audio(noise_path)
+            noise_segment = get_random_noise_segment(noise, len(speech))
 
-        mixed = mix_audio(speech, noise_segment, level)
+            level = random.choice(NOISE_LEVELS)
 
-        sf.write(f"{output_stop}/stop_aug_{stop_count}.wav", mixed, SR)
-        stop_count += 1
+            mixed = mix_audio(speech, noise_segment, level)
 
-print(f"STOP samples created: {stop_count}")
+            sf.write(f"{output_dir}/{label_name}_aug_{count}.wav", mixed, SR)
+            count += 1
 
-# CREATE NOT_STOP DATASET
+    print(f"✅ {label_name.upper()} samples created: {count}")
 
-print("Creating NOT_STOP dataset...")
+#create_keyword_dataset(speech_dir, output_stop, "stop")
 
-chunk_size = int(SR * CHUNK_DURATION)
-not_stop_count = 0
+create_keyword_dataset(help_dir, output_help, "help")
+create_keyword_dataset(fire_dir, output_fire, "fire")
 
-for noise_file in noise_files:
-    noise_path = os.path.join(noise_dir, noise_file)
-    noise = load_audio(noise_path)
-
-    chunks = split_noise_into_chunks(noise, chunk_size)
-
-    for chunk in chunks:
-        chunk = normalize(chunk)
-        sf.write(f"{output_not_stop}/noise_{not_stop_count}.wav", chunk, SR)
-        not_stop_count += 1
-
-print(f"NOT_STOP samples created: {not_stop_count}")
-
-
-print("Dataset ready for training!")
+print("\n🚀 HELP and FIRE datasets added successfully!")

@@ -1,3 +1,5 @@
 SAMPLE_RATE = 16000
 FRAME_SIZE = 320
 CHANNELS = 1
+DATASET_ROOT = "dataset/final"
+MODELS_DIR = "models"
