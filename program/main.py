@@ -16,10 +16,50 @@ from program.audio_input import get_audio_stream, read_audio_chunk, close_stream
 from program.vad import apply_vad
 from program.feature_extraction import extract_features
 from models.model_loader import load_model, predict
-from program.keyword_spotting import load_spotter, train_keyword_collection
+from program.keyword_spotting import load_spotter, train_keyword_collection, MultiKeywordTemplateSpotter
 import os
+import speech_recognition as sr
+import io
+import scipy.io.wavfile as wavfile
 
 from database.crud import init_db, add_detection, get_history
+
+# Global for STT transcript
+latest_transcript = "Listening..."
+
+def run_stt(data):
+    global latest_transcript
+    try:
+        recognizer = sr.Recognizer()
+        # Convert float32 buffer to int16 for SpeechRecognition
+        int_data = (data * 32767).astype(np.int16)
+        byte_io = io.BytesIO()
+        wavfile.write(byte_io, 16000, int_data)
+        byte_io.seek(0)
+        
+        with sr.AudioFile(byte_io) as source:
+            audio = recognizer.record(source)
+            text = recognizer.recognize_google(audio).lower()
+            latest_transcript = text
+            print(f"  [STT] {text}")
+
+            # --- STT FALLBACK TRIGGER ---
+            for kw in ["stop", "fire", "help"]:
+                if kw in text:
+                    print(f"🚨DANGER: {kw.upper()} CONFIRMED (via STT text)!")
+                    add_detection(
+                        keyword_detected=kw,
+                        status="DANGER",
+                        confidence=0.99
+                    )
+                    break
+
+    except sr.UnknownValueError:
+        pass
+    except sr.RequestError:
+        latest_transcript = "[STT Error: Check Internet]"
+    except Exception:
+        pass
 
 # Fast API setup
 app = FastAPI()
@@ -33,9 +73,25 @@ templates = Jinja2Templates(directory="dashboard/templates")
 model = load_model("models/ds_cnn_model.pth")
 AI_THRESHOLD = 0.85
 
-# TEMPLATE SIGNATURE MODEL (Real-world Fingerprint)
-template_spotter = load_spotter("models/stop_template_spotter.npz")
-TEMPLATE_THRESHOLD = 0.50  # Increased for stricter precision
+# TEMPLATE SIGNATURE MODELS (Physical Fingerprints)
+def get_ensemble():
+    keyword_files = [
+        "models/stop_template_spotter.npz",
+        "models/fire_template_spotter.npz",
+        "models/help_template_spotter.npz"
+    ]
+    available = [f for f in keyword_files if os.path.exists(f)]
+    if not available:
+        return None
+    ensemble = MultiKeywordTemplateSpotter.from_paths(available)
+    # Bypass internal thresholds to ALWAYS get the top matched keyword name instead of "unknown"
+    for spotter in ensemble.spotters:
+        spotter.threshold = 0.0
+    return ensemble
+
+template_ensemble = get_ensemble()
+TEMPLATE_THRESHOLD = 0.50  # Balanced for multi-keyword verification
+AI_THRESHOLD = 0.85
 
 # Background Audio loop
 def audio_detection_loop():
@@ -52,10 +108,28 @@ def audio_detection_loop():
     last_process_time = 0
     PROCESS_STRIDE = 0.25  # 250ms stride (4 times per second)
 
+    stt_buffer = np.zeros(0, dtype=np.float32)
+    last_stt_time = time.time()
+    STT_INTERVAL = 3.0  # 3 seconds window for STT
+
     while True:
         try:
             chunk = read_audio_chunk(stream)
+            current_time = time.time()
             buffer = np.concatenate([buffer, chunk])
+            stt_buffer = np.concatenate([stt_buffer, chunk])
+
+            # Manage STT execution every 3 seconds
+            if current_time - last_stt_time > STT_INTERVAL:
+                if len(stt_buffer) > 16000:  # Need at least 1s of audio to try
+                    stt_data = stt_buffer.copy()
+                    rms_stt = np.sqrt(np.mean(stt_data**2))
+                    # Only transcribe if someone is actually talking (energy check)
+                    if rms_stt > 0.008:  # Lowered so it reliably picks up your voice
+                        threading.Thread(target=run_stt, args=(stt_data,), daemon=True).start()
+                
+                stt_buffer = np.zeros(0, dtype=np.float32)
+                last_stt_time = current_time
 
             if len(buffer) > BUFFER_SIZE:
                 buffer = buffer[-BUFFER_SIZE:]
@@ -63,15 +137,14 @@ def audio_detection_loop():
             if len(buffer) < BUFFER_SIZE:
                 continue
 
-            current_time = time.time()
             if current_time - last_process_time < PROCESS_STRIDE:
                 continue
                 
             last_process_time = current_time
 
-            # ENERGY GATE: Filter out quiet background chatter and ambient music
+            # ENERGY GATE: Block noise and low-energy machine sounds
             rms = np.sqrt(np.mean(buffer**2))
-            if rms < 0.010:  # Tightened for better chatter rejection
+            if rms < 0.012:  # Increased from 0.008 to block background noise
                 continue
 
             speech = apply_vad(buffer)
@@ -80,33 +153,54 @@ def audio_detection_loop():
 
             # STEP 1: AI Neural Verification
             features = extract_features(speech)
-            label_id, label_name, conf = predict(model, features)
+            label_id, label_name, conf, all_probs = predict(model, features)
 
-            # STEP 2: Template Signature Verification (Searching within the 1s buffer)
-            # We use 'predict_audio' here because it 'slides' to find the best match
-            template_result = template_spotter.predict_audio(buffer, window_hop_ms=100)
-            template_score = template_result.score
+            # STEP 2: Template Signature Verification
+            template_result = None
+            if template_ensemble:
+                template_result = template_ensemble.predict_audio(buffer, window_hop_ms=150)
+            
+            template_score = template_result.score if template_result else 0
+            template_label = template_result.label if template_result else "unknown"
 
-            print(f"[{time.strftime('%H:%M:%S')}] {label_name.upper()} (AI: {conf:.2f}, Sig: {template_score:.2f})")
+            # --- ADVANCED TELEMETRY ---
+            top_3 = sorted(all_probs.items(), key=lambda x: x[1], reverse=True)[:3]
+            telemetry = ", ".join([f"{k}: {v:.2f}" for k, v in top_3])
+            
+            print(f"[{time.strftime('%H:%M:%S')}] AI: {label_name.upper()} ({conf:.2f}) | Template: {template_label.upper()} ({template_score:.2f})")
 
-            # MANDATORY DUAL-VERIFICATION LOGIC
-            # Both the AI brain AND the physical sound wave MUST agree it is a STOP.
-            if (label_name == "stop" and conf > AI_THRESHOLD) and (template_score > TEMPLATE_THRESHOLD):
-                if current_time - last_detected_time > COOLDOWN:
-                    print(f"🚨DANGER: STOP CONFIRMED! (AI: {conf:.2f}, Sig: {template_score:.2f})")
+            # --- MASTER VERIFICATION LOGIC ---
+            is_confirmed = False
+            confirmed_label = ""
 
-                    record = add_detection(
-                        keyword_detected="stop",
-                        status="DANGER",
-                        confidence=float((conf + template_score) / 2)
-                    )
-                    last_detected_time = current_time
+            # Strict Consensus (AI and Template MUST agree via solid thresholds)
+            if label_name in ["stop", "fire", "help"] and label_name == template_label:
+                if label_name == "help":
+                    # Help requires high AI confidence AND very high Signature to avoid background noise
+                    if conf > 0.95 and template_score > 0.70:
+                        confirmed_label = label_name
+                        is_confirmed = True
+                elif label_name == "fire":
+                    if conf > 0.85 and template_score > 0.55:
+                        confirmed_label = label_name
+                        is_confirmed = True
+                elif label_name == "stop":
+                    if conf > 0.80 and template_score > 0.50:
+                        confirmed_label = label_name
+                        is_confirmed = True
+            
+            # --- EXECUTION ---
+            if is_confirmed and current_time - last_detected_time > COOLDOWN:
+                print(f"⚠️  PENDING: AI suspects {confirmed_label.upper()}. Awaiting STT validation...")
+                
+                last_detected_time = current_time
+                buffer = np.zeros(0, dtype=np.float32) # Flush
             else:
-                # Captured by AI but rejected by Template signature (likely casual speech)
-                print(f"⚠️  IGNORED: AI detected '{label_name}' but template signature didn't match ({template_score:.2f})")
+                if label_name in ["stop", "fire", "help"] and current_time - last_detected_time > COOLDOWN:
+                     print(f"⚠️  IGNORED: Consensus failed (AI: {label_name}, Sig: {template_label})")
 
         except Exception as e:
-            print("Error in audio loop:", e)
+            pass # Keep loop alive
 
 # Routes
 @app.get("/", response_class=HTMLResponse)
@@ -141,6 +235,11 @@ async def history():
         }
     )
 
+@app.get("/transcript")
+async def get_transcript():
+    global latest_transcript
+    return {"transcript": latest_transcript}
+
 # Start server
 def start_server():
     uvicorn.run("program.main:app",
@@ -151,7 +250,7 @@ def start_server():
 def check_and_create_signatures():
     """Builds the signature models if they are missing, using generalized paths."""
     # Add any new keywords here that you want to verify via signatures
-    keywords_to_verify = ["stop"] 
+    keywords_to_verify = ["stop", "fire", "help"] 
     
     for kw in keywords_to_verify:
         template_path = os.path.join(MODELS_DIR, f"{kw}_template_spotter.npz")
