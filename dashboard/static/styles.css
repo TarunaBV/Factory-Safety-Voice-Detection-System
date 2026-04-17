@@ -19,7 +19,7 @@ body {
     display: flex;
     justify-content: center;
     background-image: radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
-                      radial-gradient(circle at 85% 30%, rgba(239, 68, 68, 0.1), transparent 25%);
+        radial-gradient(circle at 85% 30%, rgba(239, 68, 68, 0.1), transparent 25%);
 }
 
 .dashboard-container {
@@ -58,7 +58,7 @@ header p {
     margin-bottom: 40px;
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5);
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
 }
 
 .mic-status {
@@ -104,7 +104,7 @@ header p {
     cursor: pointer;
     transition: all 0.3s ease;
     z-index: 10;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
 }
 
 .record-btn.idle {
@@ -122,8 +122,13 @@ header p {
 }
 
 @keyframes breathing {
-    0% { transform: scale(1); }
-    100% { transform: scale(1.05); }
+    0% {
+        transform: scale(1);
+    }
+
+    100% {
+        transform: scale(1.05);
+    }
 }
 
 .current-status-box {
@@ -137,11 +142,52 @@ header p {
     transition: all 0.4s ease;
 }
 
+.transcript-box {
+    flex: 1;
+    margin-left: 30px;
+    text-align: left;
+    padding: 20px 30px;
+    border-radius: 15px;
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    min-height: 100px;
+}
+
+.transcript-box h4 {
+    margin: 0 0 10px 0;
+    color: var(--accent-blue);
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+#liveTranscript {
+    font-size: 1.1rem;
+    color: var(--text-primary);
+    font-style: italic;
+    margin: 0;
+    line-height: 1.4;
+}
+
 .current-status-box.danger {
     background: rgba(239, 68, 68, 0.2);
     border-color: rgba(239, 68, 68, 0.6);
     box-shadow: 0 0 50px rgba(239, 68, 68, 0.4);
     animation: danger-pulse 1s infinite alternate;
+}
+
+.current-status-box.fire {
+    background: rgba(251, 191, 36, 0.2);
+    border-color: rgba(251, 191, 36, 0.6);
+    box-shadow: 0 0 50px rgba(251, 191, 36, 0.4);
+    animation: fire-pulse 1s infinite alternate;
+}
+
+.current-status-box.help {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.6);
+    box-shadow: 0 0 50px rgba(59, 130, 246, 0.4);
+    animation: help-pulse 1.5s infinite alternate;
 }
 
 .current-status-box.normal {
@@ -152,14 +198,54 @@ header p {
 }
 
 @keyframes danger-pulse {
-    0% { transform: scale(1); box-shadow: 0 0 30px rgba(239, 68, 68, 0.3); }
-    100% { transform: scale(1.02); box-shadow: 0 0 60px rgba(239, 68, 68, 0.6); }
+    0% {
+        transform: scale(1);
+        box-shadow: 0 0 30px rgba(239, 68, 68, 0.3);
+    }
+
+    100% {
+        transform: scale(1.02);
+        box-shadow: 0 0 60px rgba(239, 68, 68, 0.6);
+    }
+}
+
+@keyframes fire-pulse {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 0 30px rgba(251, 191, 36, 0.3);
+    }
+
+    100% {
+        transform: scale(1.02);
+        box-shadow: 0 0 60px rgba(251, 191, 36, 0.6);
+    }
+}
+
+@keyframes help-pulse {
+    0% {
+        transform: translateY(0);
+        box-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+    }
+
+    100% {
+        transform: translateY(-5px);
+        box-shadow: 0 0 60px rgba(59, 130, 246, 0.6);
+    }
 }
 
 @keyframes listening-breathe {
-    0% { opacity: 0.8; }
-    50% { opacity: 1; border-color: rgba(16, 185, 129, 0.6); }
-    100% { opacity: 0.8; }
+    0% {
+        opacity: 0.8;
+    }
+
+    50% {
+        opacity: 1;
+        border-color: rgba(16, 185, 129, 0.6);
+    }
+
+    100% {
+        opacity: 0.8;
+    }
 }
 
 #currentStatus {
@@ -169,8 +255,24 @@ header p {
     letter-spacing: 2px;
 }
 
-.danger #currentStatus { color: #ff4d4d; text-shadow: 0 0 20px rgba(255, 77, 77, 0.5); }
-.normal #currentStatus { color: var(--normal-green); }
+.danger #currentStatus {
+    color: #ff4d4d;
+    text-shadow: 0 0 20px rgba(255, 77, 77, 0.5);
+}
+
+.fire #currentStatus {
+    color: #fbbf24;
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.5);
+}
+
+.help #currentStatus {
+    color: #60a5fa;
+    text-shadow: 0 0 20px rgba(96, 165, 250, 0.5);
+}
+
+.normal #currentStatus {
+    color: var(--normal-green);
+}
 
 #currentKeyword {
     font-size: 1.3rem;
@@ -203,10 +305,11 @@ table {
     margin-top: 15px;
 }
 
-th, td {
+th,
+td {
     padding: 15px;
     text-align: left;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 th {
@@ -221,7 +324,7 @@ tbody tr {
 }
 
 tbody tr:hover {
-    background-color: rgba(255,255,255,0.02);
+    background-color: rgba(255, 255, 255, 0.02);
 }
 
 .status-badge {
