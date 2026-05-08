@@ -8,24 +8,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 DASHBOARD_EVENTS_PATH = os.getenv("DASHBOARD_EVENTS_PATH", "dashboard_events.jsonl")
-DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-8b-8192")
 
 SYSTEM_PROMPT = """\
 You are a factory safety dashboard assistant. You answer questions about voice-detected \
 safety alert events logged from the factory floor.
 
 Each event has these fields:
-- event_type, alarm_type, action, severity, emergency, notify_supervisor
-- keyword (the detected word: stop/fire/help/danger/emergency)
-- confidence, threshold, noise_level
-- device_id, zone, repeated_count
-- timestamp (Unix epoch), detection_source, decision_source, reason
+- alarm_type (STOP / FIRE / HELP)
+- keyword (the detected word: stop/fire/help)
+- severity (high/medium)
+- emergency (true/false)
+- zone, device_id
+- timestamp (Unix epoch — convert to human-readable time when relevant)
 
-When answering:
-- Convert timestamps to human-readable local time when relevant.
+Rules you MUST follow:
+- ONLY discuss structured alert events. Do NOT mention speech recognition, \
+transcripts, STT, raw audio text, microphone input, or any spoken words that \
+are not part of an alert event.
 - Be concise and factual. Use bullet points for lists of events.
 - If no events match the question, say so clearly.
 - Never make up events that are not in the data.
+- When counting, be precise (e.g., "3 FIRE alerts were logged").
 """
 
 
@@ -57,7 +61,7 @@ def _events_to_context(events: list[dict]) -> str:
         lines.append(
             f"[{dt}] keyword={e.get('keyword')} alarm={e.get('alarm_type')} "
             f"action={e.get('action')} severity={e.get('severity')} "
-            f"conf={e.get('confidence', 0):.2f} zone={e.get('zone')} "
+            #f"conf={e.get('confidence', 0):.2f} zone={e.get('zone')} "
             f"device={e.get('device_id')} source={e.get('detection_source')}"
         )
     return "\n".join(lines)
@@ -68,9 +72,23 @@ def _call_groq(messages: list[dict]) -> str:
     if not api_key:
         raise RuntimeError("GROQ_API_KEY is not set. Export it to use the chatbot.")
 
+    # Merge system + user messages into a single user message as fallback
+    # to support both chat models and classification models.
+    merged = []
+    system_text = ""
+    for m in messages:
+        if m["role"] == "system":
+            system_text = m["content"]
+        else:
+            if system_text and m["role"] == "user":
+                merged.append({"role": "user", "content": f"{system_text}\n\n{m['content']}"})
+                system_text = ""  # Only prepend once
+            else:
+                merged.append(m)
+
     body = json.dumps({
         "model": DEFAULT_GROQ_MODEL,
-        "messages": messages,
+        "messages": merged,
         "temperature": 0.2,
     }).encode("utf-8")
 
@@ -88,8 +106,8 @@ def _call_groq(messages: list[dict]) -> str:
         with urllib.request.urlopen(req, timeout=15) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Groq request failed: {exc} — {body}") from exc
+        body_text = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Groq request failed: {exc} — {body_text}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Groq request failed: {exc}") from exc
 
