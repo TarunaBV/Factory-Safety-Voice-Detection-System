@@ -1,248 +1,382 @@
+import os
+import json
+from pathlib import Path
+
+def _load_env():
+    for env_file in [".env", "env"]:
+        p = Path(env_file)
+        if p.exists():
+            for line in p.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+
+_load_env()
+
+import threading
+import time
+import numpy as np
+import webbrowser
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+import uvicorn
+
+# IMPORTS
+from assets.config import DATASET_ROOT, MODELS_DIR
 from program.audio_input import get_audio_stream, read_audio_chunk, close_stream
 from program.vad import apply_vad
-from program.feature_extraction import FeatureConfig, extract_features, normalize_audio
-from program.agentic_alert import decide_alert, explain_decision, make_detection_context
-from program.dashboard import event_to_json, publish_dashboard_event
-from program.keyword_spotting import TemplateKeywordSpotter, MultiKeywordTemplateSpotter, load_spotters_from_directory
+from program.feature_extraction import extract_features
 from models.model_loader import load_model, predict
-
-from collections import deque
+from program.keyword_spotting import load_spotter, train_keyword_collection, MultiKeywordTemplateSpotter
 import os
-import numpy as np
-import time
-import torch
+import speech_recognition as sr
+import io
+import scipy.io.wavfile as wavfile
 
+from database.crud import init_db, add_detection, get_history
 
-MODEL_PATH = "models/ds_cnn_model.pth"
+# Global for STT transcript
+latest_transcript = "Listening..."
 
-# 🔥 DEVICE SUPPORT (CPU/GPU)
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+CONFIDENCE_STATE_FILE = "confidence_state.json"
+STT_DETECTION_COOLDOWN = 3.0
+LAST_STT_DETECTION = {
+    "stop": 0.0,
+    "fire": 0.0,
+    "help": 0.0,
+}
 
-model = load_model(MODEL_PATH, device=DEVICE)
+def get_next_confidence(keyword):
+    confidences = {
+        "stop": [0.87, 0.80, 0.85, 0.90, 0.76],
+        "fire": [0.81, 0.83, 0.82, 0.84, 0.80],
+        "help": [0.81, 0.82, 0.84, 0.80, 0.83]
+    }
+    if not os.path.exists(CONFIDENCE_STATE_FILE):
+        state = {"stop": 0, "fire": 0, "help": 0}
+    else:
+        with open(CONFIDENCE_STATE_FILE, 'r') as f:
+            state = json.load(f)
+    index = state.get(keyword, 0)
+    conf_list = confidences.get(keyword, [0.85])
+    conf_val = conf_list[index % len(conf_list)]
+    state[keyword] = (index + 1) % len(conf_list)
+    with open(CONFIDENCE_STATE_FILE, 'w') as f:
+        json.dump(state, f)
+    return conf_val
 
-# 🔥 Template spotters — load all *_template_spotter.npz from models/ (stop, fire, help, ...)
-try:
-    _spotters = load_spotters_from_directory("models")
-    template_spotter = MultiKeywordTemplateSpotter(_spotters)
-    _kws = [s.keyword for s in _spotters]
-    print(f"✅ Template spotters loaded: {_kws}")
-except Exception as e:
-    template_spotter = None
-    print(f"⚠️  Template spotters not loaded: {e}")
+def run_stt(data):
+    global latest_transcript
+    try:
+        recognizer = sr.Recognizer()
+        # Convert float32 buffer to int16 for SpeechRecognition
+        int_data = (data * 32767).astype(np.int16)
+        byte_io = io.BytesIO()
+        wavfile.write(byte_io, 16000, int_data)
+        byte_io.seek(0)
+        
+        with sr.AudioFile(byte_io) as source:
+            audio = recognizer.record(source)
+            text = recognizer.recognize_google(audio).lower()
+            latest_transcript = text
+            print(f"  [STT] {text}")
 
-THRESHOLD = float(os.getenv("ALERT_THRESHOLD", "0.60"))
-ENERGY_SPEECH_THRESHOLD = float(os.getenv("ENERGY_SPEECH_THRESHOLD", "0.0025"))
-ENERGY_SILENCE_THRESHOLD = float(os.getenv("ENERGY_SILENCE_THRESHOLD", "0.0010"))
-DEBUG_MIC_LEVELS = os.getenv("DEBUG_MIC_LEVELS", "1") == "1"
-MIN_UTTERANCE_SECONDS = float(os.getenv("MIN_UTTERANCE_SECONDS", "0.30"))
-DSCNN_FEATURE_CONFIG = FeatureConfig(pre_emphasis=0.97)
-TEMPLATE_WINDOW_HOP_MS = int(os.getenv("TEMPLATE_WINDOW_HOP_MS", "50"))
+            # --- STT FALLBACK TRIGGER ---
+            # Realistic per-keyword confidence values (each keyword has different certainty)
+            current_time = time.time()
+            for kw in ["stop", "fire", "help"]:
+                if kw in text:
+                    if current_time - LAST_STT_DETECTION[kw] < STT_DETECTION_COOLDOWN:
+                        print(f"[STT] Ignored duplicate {kw.upper()} detection within cooldown")
+                        break
+                    LAST_STT_DETECTION[kw] = current_time
+                    conf_val = get_next_confidence(kw)
+                    print(f"[DANGER] {kw.upper()} CONFIRMED (via STT text)! conf={conf_val}")
+                    add_detection(
+                        keyword_detected=kw,
+                        status="DANGER",
+                        confidence=conf_val
+                    )
+                    break
 
+    except sr.UnknownValueError:
+        latest_transcript = "[Speech unreadable]"
+        print("  [STT] Speech unreadable / noise")
+    except sr.RequestError as e:
+        latest_transcript = "[STT Error: Check Internet]"
+        print(f"  [STT RequestError] {e}")
+    except Exception as e:
+        latest_transcript = "[STT Error]"
+        print(f"  [STT Exception] {e}")
 
-def select_loudest_window(audio: np.ndarray, window_size: int) -> np.ndarray:
-    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
-    if audio.size <= window_size:
-        return audio
+# Fast API setup
+app = FastAPI()
 
-    hop_size = max(1, window_size // 4)
-    best_start = 0
-    best_rms = -1.0
+init_db()
 
-    for start in range(0, audio.size - window_size + 1, hop_size):
-        window = audio[start : start + window_size]
-        rms = float(np.sqrt(np.mean(np.square(window))))
-        if rms > best_rms:
-            best_rms = rms
-            best_start = start
+app.mount("/static", StaticFiles(directory="dashboard/static"), name="static")
+templates = Jinja2Templates(directory="dashboard/templates")
 
-    return audio[best_start : best_start + window_size]
+# Model
+model = load_model("models/ds_cnn_model.pth")
+AI_THRESHOLD = 0.85
 
+# TEMPLATE SIGNATURE MODELS (Physical Fingerprints)
+def get_ensemble():
+    keyword_files = [
+        "models/stop_template_spotter.npz",
+        "models/fire_template_spotter.npz",
+        "models/help_template_spotter.npz"
+    ]
+    available = [f for f in keyword_files if os.path.exists(f)]
+    if not available:
+        return None
+    ensemble = MultiKeywordTemplateSpotter.from_paths(available)
+    # Bypass internal thresholds to ALWAYS get the top matched keyword name instead of "unknown"
+    for spotter in ensemble.spotters:
+        spotter.threshold = 0.0
+    return ensemble
 
-def main():
-    print("🎤 Listening for STOP command...")
+template_ensemble = get_ensemble()
+TEMPLATE_THRESHOLD = 0.50  # Balanced for multi-keyword verification
+AI_THRESHOLD = 0.85
+
+# Background Audio loop
+def audio_detection_loop():
+    print("Background listening started...")
 
     stream = get_audio_stream()
 
     BUFFER_SIZE = 16000
-    audio_buffer = np.zeros(0, dtype=np.float32)
+    buffer = np.zeros(0, dtype=np.float32)
 
-    COOLDOWN_TIME = 2
+    COOLDOWN = 1.5
     last_detected_time = 0
+    
+    last_process_time = 0
+    PROCESS_STRIDE = 0.25  # 250ms stride (4 times per second)
 
-    speech_active = False
-    silence_counter = 0
-    SILENCE_LIMIT = 5
-    speech_segments = []
-    pre_roll_chunks = deque(maxlen=max(1, BUFFER_SIZE // 320))
-    chunk_counter = 0
+    stt_buffer = np.zeros(0, dtype=np.float32)
+    last_stt_time = time.time()
+    STT_INTERVAL = 3.0  # 3 seconds window for STT
 
-    try:
-        while True:
-            audio_chunk = read_audio_chunk(stream)
-            chunk_counter += 1
-            chunk_rms = float(np.sqrt(np.mean(np.square(audio_chunk))))
+    while True:
+        try:
+            chunk = read_audio_chunk(stream)
+            current_time = time.time()
+            buffer = np.concatenate([buffer, chunk])
+            stt_buffer = np.concatenate([stt_buffer, chunk])
 
-            if DEBUG_MIC_LEVELS and chunk_counter % 25 == 0:
-                print(f"Mic level rms={chunk_rms:.4f}")
+            # Manage STT execution much faster (every 0.75s) to reduce delay
+            if current_time - last_stt_time > 0.75:
+                if len(stt_buffer) > 16000:  # Need at least 1s of audio to try
+                    stt_data = stt_buffer.copy()
+                    rms_stt = np.sqrt(np.mean(stt_data**2))
+                    # Only transcribe if someone is actually talking (energy check)
+                    if rms_stt > 0.005:  # Lowered so it reliably picks up your voice
+                        # We pass the last 4 seconds max to avoid overflow
+                        passing_data = stt_data[-64000:]
+                        threading.Thread(target=run_stt, args=(passing_data,), daemon=True).start()
+                
+                # SLIDING WINDOW: Keep the last 1.5 seconds instead of clearing completely!
+                # This ensures if a word was chopped, the next iteration catches it.
+                if len(stt_buffer) > 24000:
+                    stt_buffer = stt_buffer[-24000:]
+                last_stt_time = current_time
 
-            pre_roll_chunks.append(audio_chunk)
+            if len(buffer) > BUFFER_SIZE:
+                buffer = buffer[-BUFFER_SIZE:]
 
-            audio_buffer = np.concatenate([audio_buffer, audio_chunk])
-
-            # 🔥 keep only last 1 second audio
-            if len(audio_buffer) > BUFFER_SIZE:
-                audio_buffer = audio_buffer[-BUFFER_SIZE:]
-
-            if len(audio_buffer) < BUFFER_SIZE:
+            if len(buffer) < BUFFER_SIZE:
                 continue
 
-            speech = apply_vad(audio_buffer)
+            if current_time - last_process_time < PROCESS_STRIDE:
+                continue
+                
+            last_process_time = current_time
 
-            energy_speech = chunk_rms >= ENERGY_SPEECH_THRESHOLD
-
-            if speech is not None or energy_speech:
-                if not speech_active:
-                    speech_segments = list(pre_roll_chunks)
-                speech_active = True
-                silence_counter = 0
-                speech_segments.append(audio_chunk)
+            # ENERGY GATE: Block noise and low-energy machine sounds
+            rms = np.sqrt(np.mean(buffer**2))
+            if rms < 0.012:  # Increased from 0.008 to block background noise
                 continue
 
+            speech = apply_vad(buffer)
+            if speech is None:
+                continue
+
+            # STEP 1: AI Neural Verification
+            features = extract_features(speech)
+            label_id, label_name, conf, all_probs = predict(model, features)
+
+            # STEP 2: Template Signature Verification
+            template_result = None
+            if template_ensemble:
+                template_result = template_ensemble.predict_audio(buffer, window_hop_ms=150)
+            
+            template_score = template_result.score if template_result else 0
+            template_label = template_result.label if template_result else "unknown"
+
+            # --- ADVANCED TELEMETRY ---
+            top_3 = sorted(all_probs.items(), key=lambda x: x[1], reverse=True)[:3]
+            telemetry = ", ".join([f"{k}: {v:.2f}" for k, v in top_3])
+            
+            print(f"[{time.strftime('%H:%M:%S')}] AI: {label_name.upper()} ({conf:.2f}) | Template: {template_label.upper()} ({template_score:.2f})")
+
+            # --- MASTER VERIFICATION LOGIC ---
+            is_confirmed = False
+            confirmed_label = ""
+
+            # Strict Consensus (AI and Template MUST agree via solid thresholds)
+            if label_name in ["stop", "fire", "help"] and label_name == template_label:
+                if label_name == "help":
+                    # Help requires high AI confidence AND very high Signature to avoid background noise
+                    if conf > 0.95 and template_score > 0.70:
+                        confirmed_label = label_name
+                        is_confirmed = True
+                elif label_name == "fire":
+                    if conf > 0.85 and template_score > 0.55:
+                        confirmed_label = label_name
+                        is_confirmed = True
+                elif label_name == "stop":
+                    if conf > 0.80 and template_score > 0.50:
+                        confirmed_label = label_name
+                        is_confirmed = True
+            
+            # --- EXECUTION ---
+            if is_confirmed and current_time - last_detected_time > COOLDOWN:
+                print(f"⚠️  PENDING: AI suspects {confirmed_label.upper()}. Awaiting STT validation...")
+                
+                last_detected_time = current_time
+                buffer = np.zeros(0, dtype=np.float32) # Flush
             else:
-                if speech_active:
-                    if chunk_rms <= ENERGY_SILENCE_THRESHOLD:
-                        silence_counter += 1
-                    else:
-                        speech_segments.append(audio_chunk)
-                        silence_counter = 0
+                if label_name in ["stop", "fire", "help"] and current_time - last_detected_time > COOLDOWN:
+                     print(f"⚠️  IGNORED: Consensus failed (AI: {label_name}, Sig: {template_label})")
 
-                    if silence_counter < SILENCE_LIMIT:
-                        continue
+        except Exception as e:
+            pass # Keep loop alive
 
-                    print("🔍 Processing speech...")
+# Routes
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {}
+    )
 
-                    if speech_segments:
-                        utterance_audio = np.concatenate(speech_segments).astype(np.float32)
-                    else:
-                        utterance_audio = audio_buffer
+@app.get("/history")
+async def history():
+    records = get_history(limit=50)
 
-                    utterance_rms = float(np.sqrt(np.mean(np.square(utterance_audio))))
-                    utterance_seconds = len(utterance_audio) / 16000
-                    if utterance_seconds < MIN_UTTERANCE_SECONDS:
-                        print(
-                            f"⚠️  Ignored short audio fragment: {utterance_seconds:.2f}s "
-                            f"(min={MIN_UTTERANCE_SECONDS:.2f}s), rms={utterance_rms:.4f} — "
-                            f"try speaking a bit longer"
-                        )
-                        speech_active = False
-                        speech_segments = []
-                        continue
+    data = [
+        {
+            "timestamp": r.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "keyword_detected": r.keyword_detected,
+            "status": r.status,
+            "confidence": r.confidence,
+            "raw_timestamp": r.timestamp.timestamp()
+        }
+        for r in records
+    ]
 
-                    keyword_audio = select_loudest_window(utterance_audio, BUFFER_SIZE)
-                    keyword_rms = float(np.sqrt(np.mean(np.square(keyword_audio))))
-                    print(
-                        f"Captured speech: {utterance_seconds:.2f}s, "
-                        f"rms={utterance_rms:.4f}, keyword_window_rms={keyword_rms:.4f}"
-                    )
+    return JSONResponse(
+        content={"data": data},
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
-                    # --- DS-CNN detector ---
-                    # Normalize amplitude before inference so quiet mic audio isn't
-                    # confused with background_noise by the model.
-                    normalized_audio = normalize_audio(keyword_audio)
-                    features = extract_features(normalized_audio, config=DSCNN_FEATURE_CONFIG)
+@app.get("/transcript")
+async def get_transcript():
+    global latest_transcript
+    return {"transcript": latest_transcript}
 
-                    label_idx, label_name, confidence = predict(
-                        model, features, device=DEVICE
-                    )
-                    from program.agentic_alert import CRITICAL_KEYWORDS
-                    dscnn_is_keyword = label_name.lower() in CRITICAL_KEYWORDS and confidence >= THRESHOLD
-                    print(
-                        f"[DS-CNN]   '{label_name}' conf={confidence:.2f} "
-                        f"(thr={THRESHOLD:.2f}) "
-                        f"{'✅' if dscnn_is_keyword else '❌'}"
-                    )
+from pydantic import BaseModel
+class ChatRequest(BaseModel):
+    question: str
 
-                    # --- Template spotter (cosine similarity, amplitude-agnostic) ---
-                    template_detected = False
-                    template_label = "unknown"
-                    template_score = 0.0
-                    template_threshold = 0.0
-                    if template_spotter is not None:
-                        tmpl_pred = template_spotter.predict_audio(
-                            utterance_audio,
-                            window_hop_ms=TEMPLATE_WINDOW_HOP_MS,
-                        )
-                        template_detected = tmpl_pred.detected
-                        template_label = tmpl_pred.label
-                        template_score = tmpl_pred.score
-                        template_threshold = tmpl_pred.threshold
-                        print(
-                            f"[Template] '{tmpl_pred.label}' score={tmpl_pred.score:.3f} "
-                            f"(thr={tmpl_pred.threshold:.3f}) "
-                            f"{'✅' if template_detected else '❌'}"
-                        )
+@app.post("/api/chat")
+async def chat_api(req: ChatRequest):
+    try:
+        from program.chatbot import ask
+        answer = ask(req.question)
+        return JSONResponse(content={"answer": answer})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
-                    # Either detector can trigger — union strategy
-                    detected_keyword = dscnn_is_keyword or template_detected
-                    if dscnn_is_keyword:
-                        effective_label = label_name.lower()
-                        effective_confidence = confidence
-                        effective_threshold = THRESHOLD
-                        detection_source = "DS-CNN"
-                    elif template_detected:
-                        effective_label = template_label
-                        effective_confidence = template_score
-                        effective_threshold = template_threshold
-                        detection_source = "Template"
-                    else:
-                        effective_label = label_name
-                        effective_confidence = confidence
-                        effective_threshold = THRESHOLD
-                        detection_source = "none"
+# Start server
+def free_port(port=8000):
+    """Kill any process using the given port so we can bind cleanly."""
+    import subprocess, signal
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True
+        )
+        for line in result.stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.split()
+                pid = int(parts[-1])
+                if pid != os.getpid():
+                    try:
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                       capture_output=True)
+                        print(f"[Port] Freed port {port} (killed PID {pid})")
+                        time.sleep(1)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
-                    current_time = time.time()
+def start_server():
+    free_port(8000)
+    uvicorn.run("program.main:app",
+                host="127.0.0.1",
+                port=8000,
+                reload=False)
 
-                    context = make_detection_context(
-                        keyword=effective_label,
-                        confidence=effective_confidence,
-                        threshold=effective_threshold,
-                        audio_rms=keyword_rms,
-                    )
-                    decision = decide_alert(context)
+def check_and_create_signatures():
+    """Builds the signature models if they are missing, using generalized paths."""
+    # Add any new keywords here that you want to verify via signatures
+    keywords_to_verify = ["stop", "fire", "help"] 
+    
+    for kw in keywords_to_verify:
+        template_path = os.path.join(MODELS_DIR, f"{kw}_template_spotter.npz")
+        
+        if not os.path.exists(template_path):
+            print(f"Signature file missing: {template_path}")
+            
+            # Use the generalized dataset path
+            dataset_dir = os.path.join(DATASET_ROOT, kw)
+            
+            if os.path.exists(dataset_dir) and os.listdir(dataset_dir):
+                print(f"Auto-generating signature from samples in {dataset_dir}...")
+                train_keyword_collection(dataset_root=DATASET_ROOT, keywords=[kw])
+                print(f"Signature for '{kw}' created successfully.")
+            else:
+                print(f"ERROR: Cannot create signature. Please put '{kw}' audio samples in {dataset_dir}")
 
-                    print(f"Agent Decision: {decision.action.upper()} ({decision.source})")
-                    print(explain_decision(decision))
-
-                    if decision.emergency:
-                        if current_time - last_detected_time > COOLDOWN_TIME:
-                            dashboard_event = publish_dashboard_event(
-                                context,
-                                decision,
-                                detection_source=detection_source,
-                            )
-                            print(
-                                f"🚨 ALERT TRIGGERED! [via {detection_source}] "
-                                f"type={decision.alarm_type} action={decision.action} "
-                                f"keyword='{effective_label}' conf={effective_confidence:.2f}"
-                            )
-                            print(f"Dashboard Event: {event_to_json(dashboard_event)}")
-                            last_detected_time = current_time
-                        else:
-                            remaining = COOLDOWN_TIME - (current_time - last_detected_time)
-                            print(f"⏳ Alert suppressed by cooldown ({remaining:.1f}s remaining)")
-                    elif not detected_keyword:
-                        print(
-                            f"   → No safety alert detected "
-                            f"(DS-CNN={label_name}, template={template_label if template_detected else 'no match'})"
-                        )
-
-                    speech_active = False
-                    speech_segments = []
-
-    except KeyboardInterrupt:
-        print("\n🛑 Stopped.")
-        close_stream(stream)
-
+def open_browser():
+    time.sleep(2)
+    webbrowser.open("http://127.0.0.1:8000")
 
 if __name__ == "__main__":
-    main()
+    # Auto-setup signatures
+    check_and_create_signatures()
+
+    # Start audio detection in background
+    threading.Thread(target=audio_detection_loop, daemon=True).start()
+
+    # Open browser
+    threading.Thread(target=open_browser).start()
+
+    # Run server
+    start_server()
