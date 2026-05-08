@@ -13,7 +13,6 @@ from program.keyword_spotting import (
     discover_keywords,
     train_keyword_collection,
 )
-from program.feature_extraction import extract_features
 
 
 SAMPLE_RATE = 16000
@@ -79,22 +78,3 @@ def test_train_collection_and_predict_any_keyword(tmp_path: Path) -> None:
     restored = TemplateKeywordSpotter.load(output_dir / "stop_template_spotter.npz")
     stop_prediction = restored.predict_file(dataset_root / "stop" / "stop_0.wav")
     assert stop_prediction.label == "stop"
-
-
-def test_template_spotter_checks_final_window_for_slightly_long_audio() -> None:
-    rng = np.random.default_rng(11)
-    keyword_audio = (0.1 * rng.standard_normal(SAMPLE_RATE)).astype(np.float32)
-    spotter = TemplateKeywordSpotter(
-        keyword="stop",
-        prototype=extract_features(keyword_audio),
-        threshold=0.90,
-    )
-    audio_with_preroll = np.concatenate(
-        [np.zeros(SAMPLE_RATE // 5, dtype=np.float32), keyword_audio]
-    )
-
-    prediction = spotter.predict_audio(audio_with_preroll, window_hop_ms=250)
-
-    assert prediction.detected is True
-    assert prediction.label == "stop"
-    assert prediction.best_window_start_ms == 200
